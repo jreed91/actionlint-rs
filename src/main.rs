@@ -14,7 +14,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::Parser;
 
-use actionlint_rs::{diagnostic::Diagnostic, lint, sarif, schema};
+use actionlint_rs::{diagnostic::Diagnostic, filter::IgnoreFilter, lint, sarif, schema};
 use clap::ValueEnum;
 
 #[derive(Parser, Debug)]
@@ -35,6 +35,11 @@ struct Cli {
     /// (default), or the community SchemaStore schema.
     #[arg(long, value_enum, default_value_t = SchemaArg::FirstParty)]
     schema: SchemaArg,
+
+    /// Suppress diagnostics whose message matches this regular expression. Repeatable; a
+    /// diagnostic is suppressed if it matches any pattern.
+    #[arg(long = "ignore", value_name = "REGEX")]
+    ignore: Vec<String>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -86,6 +91,9 @@ fn run() -> Result<bool> {
     // makes the default action invocation fall through to workflow discovery.
     let args = std::env::args_os().filter(|a| !a.is_empty());
     let cli = Cli::parse_from(args);
+    // Compile ignore patterns up front so an invalid regex fails fast (exit 2), before any
+    // linting work.
+    let ignore = IgnoreFilter::new(&cli.ignore)?;
     let validator = schema::build_validator_for(cli.schema.into())?;
 
     let mut all: Vec<Diagnostic> = Vec::new();
@@ -117,6 +125,9 @@ fn run() -> Result<bool> {
             all.extend(lint::lint_file(&validator, file)?);
         }
     }
+
+    // Suppress diagnostics matching any --ignore pattern before output and exit-code logic.
+    let all = ignore.apply(all);
 
     match cli.format {
         Format::Human => {

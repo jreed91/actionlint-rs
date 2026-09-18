@@ -104,6 +104,38 @@ fn missing_file_is_usage_error_exit_two() {
 }
 
 #[test]
+fn ignore_pattern_suppresses_matching_diagnostics() {
+    let dir = tmpdir("ignore");
+    let f = dir.join("wf.yml");
+    std::fs::write(&f, "on: push\njobs:\n  b:\n    steps: [{run: hi}]\n").unwrap();
+    // Without --ignore: flagged (exit 1).
+    let out = Command::new(bin()).arg(&f).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    // With a matching --ignore: suppressed (exit 0, no output).
+    let out = Command::new(bin())
+        .arg(&f)
+        .arg("--ignore")
+        .arg("runs-on")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "matching --ignore should suppress the only finding");
+    assert!(String::from_utf8_lossy(&out.stdout).trim().is_empty());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn invalid_ignore_pattern_is_usage_error_exit_two() {
+    let out = Command::new(bin())
+        .arg("-")
+        .arg("--ignore")
+        .arg("(")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("invalid --ignore pattern"));
+}
+
+#[test]
 fn sarif_format_emits_valid_sarif_and_exit_one_on_problems() {
     let dir = tmpdir("sarif");
     let f = dir.join("wf.yml");

@@ -10,6 +10,7 @@ dependencies = [
  "clap",
  "insta",
  "jsonschema",
+ "regex",
  "saphyr",
  "serde_json",
 ]
