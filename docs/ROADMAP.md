@@ -39,10 +39,16 @@ pretending otherwise is how this project would mislead its users.
 - [ ] Enum tightening the SchemaStore schema leaves loose (permissions scopes, shells,
       runner labels). (Data-driven.)
 
-### Schema thesis does NOT help — hand-coded, the hard part
-- [ ] **Expression `${{ }}` lexer/parser/AST.** (Syntax errors in expressions.)
-- [ ] **Expression type system** — type-check `contains(...)`, `format(...)`, etc.
-      against context types. (actionlint's `expr_sema.go` / `expr_type.go`; hand-coded.)
+### Full check parity (ADR-0006) — hand-coded, in progress
+- [x] **Expression `${{ }}` lexer/parser/AST** (`src/expr/`, step 1).
+- [x] **Expression type system** — contexts + built-in function signatures, type-checking
+      (`src/expr/ty.rs`, `builtins.rs`, `check.rs`, step 2).
+- [x] **Expression checking wired into the linter** (`src/expr_lint.rs`, step 3): every
+      `${{ }}` in a workflow string is parsed + type-checked; diagnostics anchored at the
+      containing scalar. On by default; ZERO false positives across the 29-workflow xval
+      corpus. (Precise intra-string column is a future refinement.)
+- [ ] Context **availability by position** (which contexts are valid under which keys;
+      step-output existence via `steps.<id>.outputs`).
 - [ ] **Context availability + dataflow** — which contexts/props are valid under which
       keys; step-output existence; `secrets`/`needs` availability. (Scraped from
       github/docs `contexts.md` — resync-able for the *table*, but the *analysis* is

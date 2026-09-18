@@ -5,6 +5,7 @@
 
 pub mod diagnostic;
 pub mod expr;
+pub mod expr_lint;
 pub mod filter;
 pub mod humanize;
 pub mod lint;

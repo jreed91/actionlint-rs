@@ -422,6 +422,13 @@ mod tests {
     }
 
     #[test]
+    fn sequence_without_item_type_is_array_of_any() {
+        let mut c = Ctx::default();
+        let n = json!({ "sequence": {} });
+        assert_eq!(c.node_to_schema("s", &n), json!({"type":"array","items":{}}));
+    }
+
+    #[test]
     fn one_of_becomes_one_of() {
         let mut c = Ctx::default();
         let n = json!({ "one-of": ["a", "b"] });

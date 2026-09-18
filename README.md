@@ -17,8 +17,11 @@ precise `file:line:col` diagnostics in plain language — e.g. a job missing `ru
 `` `build` is missing required key `runs-on` `` rather than raw JSON-Schema `oneOf` jargon
 (see `src/humanize.rs`).
 
-v1 **does not** (yet) check:
-- expressions inside `${{ }}` — they are treated as opaque strings;
+It also type-checks `${{ }}` expressions — unknown contexts (`gihtub.sha`), unknown
+properties (`runner.oss`), unknown functions, wrong arity, and syntax errors — anchored at
+the containing value (see `src/expr/`, `src/expr_lint.rs`).
+
+Still **does not** (yet) check:
 - context/property availability or dataflow (`steps.x.outputs`, `needs`, `secrets`);
 - shell (`shellcheck`) or Python (`pyflakes`) inside `run:`;
 - `uses:`/action-metadata, deprecated actions, security/script-injection.

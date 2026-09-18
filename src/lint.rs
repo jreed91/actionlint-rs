@@ -1,7 +1,9 @@
-//! Orchestration: parse a workflow, validate its structure, and produce diagnostics.
+//! Orchestration: parse a workflow, validate its structure and its `${{ }}` expressions,
+//! and produce diagnostics.
 //!
-//! v1 scope is the structural layer only (see CONTEXT.md / docs/ROADMAP.md). Expressions
-//! (`${{ }}`) are opaque; a structurally-valid workflow with a broken expression passes.
+//! Two passes run over the parsed workflow: structural validation against the schema
+//! (`humanize`d), and expression type-checking (`expr_lint`, ADR-0006). Their diagnostics are
+//! merged and sorted by source position.
 
 use std::path::{Path, PathBuf};
 
@@ -9,9 +11,7 @@ use anyhow::{Context, Result};
 use jsonschema::Validator;
 
 use crate::diagnostic::{Diagnostic, Position};
-use crate::humanize;
-use crate::span;
-use crate::yaml;
+use crate::{expr_lint, humanize, span, yaml};
 
 /// Lint one workflow file's source text against the compiled schema.
 ///
@@ -37,9 +37,18 @@ pub fn lint_source(validator: &Validator, path: &Path, source: &str) -> Result<V
         })
         .collect();
 
-    // Stable, source-order output: sort by position, then by pointer for determinism.
+    // Expression pass: type-check every `${{ }}` embedded in a string value.
+    diagnostics.extend(expr_lint::lint_expressions(&parsed.json, &parsed.marked, path));
+
+    // Stable, source-order output: sort by position, then by pointer, then message for
+    // determinism (a scalar can carry both structural and expression diagnostics).
     diagnostics.sort_by(|a, b| {
-        (a.pos.line, a.pos.col, &a.pointer).cmp(&(b.pos.line, b.pos.col, &b.pointer))
+        (a.pos.line, a.pos.col, &a.pointer, &a.message).cmp(&(
+            b.pos.line,
+            b.pos.col,
+            &b.pointer,
+            &b.message,
+        ))
     });
     Ok(diagnostics)
 }
@@ -137,8 +146,8 @@ jobs:
     }
 
     #[test]
-    fn expressions_are_opaque_in_v1() {
-        // A broken expression inside ${{ }} must NOT be flagged in v1 (documented limit).
+    fn broken_expression_is_flagged() {
+        // ADR-0006: expressions are no longer opaque — `this` is an unknown context.
         let src = "\
 on: push
 jobs:
@@ -149,9 +158,40 @@ jobs:
 ";
         let diags = lint_source(&validator(), Path::new("wf.yml"), src).unwrap();
         assert!(
-            diags.is_empty(),
-            "v1 should treat expressions as opaque, got: {diags:?}"
+            diags.iter().any(|d| d.message.contains("unknown context `this`")),
+            "expected an expression diagnostic, got: {diags:?}"
         );
+    }
+
+    #[test]
+    fn valid_expression_and_structure_is_clean() {
+        let src = "\
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' }}
+    steps:
+      - run: echo ${{ runner.os }}
+";
+        let diags = lint_source(&validator(), Path::new("wf.yml"), src).unwrap();
+        assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
+    #[test]
+    fn structural_and_expression_diagnostics_coexist() {
+        // Missing runs-on (structural) AND an unknown context (expression).
+        let src = "\
+on: push
+jobs:
+  build:
+    if: ${{ bogus.x }}
+    steps:
+      - run: echo hi
+";
+        let diags = lint_source(&validator(), Path::new("wf.yml"), src).unwrap();
+        assert!(diags.iter().any(|d| d.message.contains("runs-on")));
+        assert!(diags.iter().any(|d| d.message.contains("unknown context `bogus`")));
     }
 }
 
