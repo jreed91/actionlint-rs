@@ -81,9 +81,13 @@ fn key_matches(key: &MarkedYaml<'_>, token: &str) -> bool {
 }
 
 /// The start of a node's span, as a 1-indexed [`Position`].
+///
+/// saphyr's markers are 1-indexed, but the root/document node can report column 0 (it has
+/// no leading indentation). Clamp line and column to a minimum of 1 so diagnostics never
+/// emit a `:0` position, which editors and humans read as invalid.
 fn start_position(node: &MarkedYaml<'_>) -> Position {
     let start = node.span.start;
-    Position::new(start.line(), start.col())
+    Position::new(start.line().max(1), start.col().max(1))
 }
 
 /// Unescape a single JSON Pointer reference token (RFC 6901 §4).
@@ -111,6 +115,8 @@ mod tests {
         let parsed = yaml::parse(src).unwrap();
         let pos = position_for_pointer(&parsed.marked, "").unwrap();
         assert_eq!(pos.line, 1);
+        // Root nodes can report column 0 in saphyr; we clamp to 1 (never emit `:0`).
+        assert!(pos.col >= 1, "column must be 1-indexed, got {}", pos.col);
     }
 
     #[test]

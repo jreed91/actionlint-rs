@@ -1,0 +1,3 @@
+# A workflow must have `jobs`; a workflow with only `on` is incomplete.
+on: push
+name: no jobs here

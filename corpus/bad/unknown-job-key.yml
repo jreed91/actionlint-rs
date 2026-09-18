@@ -1,0 +1,7 @@
+# A misspelled job-level key (`runs-onn`) should be caught as unexpected / missing runs-on.
+on: push
+jobs:
+  build:
+    runs-onn: ubuntu-latest
+    steps:
+      - run: echo hi

@@ -6,6 +6,7 @@
 pub mod diagnostic;
 pub mod humanize;
 pub mod lint;
+pub mod reconcile;
 pub mod schema;
 pub mod span;
 pub mod yaml;

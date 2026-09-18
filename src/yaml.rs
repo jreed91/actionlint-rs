@@ -29,7 +29,10 @@ pub fn parse(source: &str) -> Result<ParsedWorkflow<'_>> {
         return Err(anyhow!("empty YAML document"));
     }
     let marked = docs.swap_remove(0);
-    let json = to_json(&marked);
+    let mut json = to_json(&marked);
+    // Apply documented GitHub-vs-SchemaStore reconciliations before validation so real,
+    // valid workflows aren't flagged by schema strictness (see reconcile module / ADR-0001).
+    crate::reconcile::reconcile(&mut json);
     Ok(ParsedWorkflow { marked, json })
 }
 

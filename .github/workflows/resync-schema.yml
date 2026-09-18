@@ -25,10 +25,10 @@ jobs:
           curl -sfL https://json.schemastore.org/github-workflow.json \
             -o schemas/github-workflow.json.new
 
-      - name: Fetch GitHub first-party schema (advisory cross-check)
-        run: |
-          curl -sfL https://raw.githubusercontent.com/actions/languageservices/main/workflow-parser/src/workflow-v1.0.json \
-            -o /tmp/workflow-v1.0.json || echo "first-party fetch failed (advisory only)"
+      - name: Advisory cross-check vs GitHub first-party schema
+        # Reports SchemaStore-vs-GitHub event divergences for human review (option C).
+        # Advisory only — never fails the job.
+        run: ./scripts/schema-crosscheck.sh | tee /tmp/crosscheck.txt
 
       - name: Detect change
         id: diff

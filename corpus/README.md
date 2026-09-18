@@ -18,7 +18,27 @@ Expected results are "golden by inspection": run the linter once, review the out
 commit it as the baseline. When a resync changes a baseline, that change is what the human
 reviews.
 
+## Current contents
+
+`good/` (must lint clean):
+- `minimal.yml`, `matrix-and-expressions.yml` — hand-authored basics (+ opaque expressions).
+- `null-env-value.yml` — regression for the null-env reconciliation (see `src/reconcile.rs`).
+- `real-*.yml` — curated real-world workflows scraped from popular public repos
+  (actions/checkout, rust-lang/cargo, rust-lang/mdBook, BurntSushi/ripgrep, sharkdp/bat,
+  cli/cli). Each was linted and confirmed clean during curation.
+
+`bad/` (must produce >=1 diagnostic):
+- `missing-runs-on.yml`, `on-wrong-type.yml`, `missing-jobs.yml`, `unknown-job-key.yml`,
+  `step-has-both-run-and-uses.yml`.
+
+## Curation findings
+- **SchemaStore false positive (null env values):** ripgrep's real CI declares `TARGET_FLAGS:`
+  (empty env value = YAML null). SchemaStore rejects null env values; GitHub accepts them.
+  Handled by a documented reconciliation in `src/reconcile.rs`, not by editing the vendored
+  schema. `null-env-value.yml` guards it.
+
 ## TODO (roadmap)
-- [ ] Scrape a corpus of real known-good workflows from popular repos.
+- [x] Scrape a corpus of real known-good workflows from popular repos.
+- [ ] Broaden further (containers, services, concurrency, reusable-workflow callers).
 - [ ] Import applicable MIT-licensed test fixtures from rhysd/actionlint.
 - [ ] Add snapshot-based expected output per file (insta) rather than just non-empty.

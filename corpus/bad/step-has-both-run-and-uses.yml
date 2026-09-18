@@ -1,0 +1,8 @@
+# A step must be exactly one of run / uses (the step oneOf); having both is invalid.
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        run: echo "can't have both"

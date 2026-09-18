@@ -6,22 +6,24 @@ thesis helps** — because most of the remaining value does NOT come from a sche
 pretending otherwise is how this project would mislead its users.
 
 ## v1 (MVP) — in scope
-- [ ] Parse workflow YAML into a form we can validate.
-- [ ] Validate **structure** against vendored SchemaStore `github-workflow.json`.
-- [ ] Map schema validation errors to good diagnostics (file:line:col, message).
-- [ ] Schema vendored as committed file, embedded via `include_str!`.
-- [ ] A+D **auto-resync pipeline**: scheduled CI fetches SchemaStore, diffs, opens PR.
-- [ ] Resync gate **cross-checks** GitHub's first-party `workflow-v1.0.json` (advisory
-      signal: flag SchemaStore-vs-GitHub disagreements for review).
-- [ ] **Golden corpus** of workflows + expected lint results (trust gate). REQUIRED
-      for the resync gate — real ongoing commitment (ADR-0003). Seed = **option C**:
-      hand-authored known-BAD files (prove we catch structural errors) + scraped real-world
-      known-GOOD workflows from popular public repos (prove no false positives on
-      legit workflows) + actionlint's MIT test fixtures. Expected results are "golden by
-      inspection" (run once, human-review the baseline).
-- [ ] Resync PR runs linter w/ new schema over corpus, surfaces diff, human approves merge.
-- [ ] **CLI** binary — the real primitive (lint files/dirs/stdin, exit codes, diagnostics).
-- [ ] **Docker-based GitHub Action** (thin wrapper over the CLI) — v1 distribution.
+- [x] Parse workflow YAML into a form we can validate. (`src/yaml.rs`)
+- [x] Validate **structure** against vendored SchemaStore `github-workflow.json`.
+- [x] Map schema validation errors to good diagnostics (file:line:col, message) — with
+      humanized `oneOf` messages (`src/humanize.rs`) and 1-indexed positions.
+- [x] Schema vendored as committed file, embedded via `include_str!`. (`src/schema.rs`)
+- [x] A+D **auto-resync pipeline**: scheduled CI fetches SchemaStore, diffs, opens PR.
+      (`.github/workflows/resync-schema.yml`)
+- [x] Resync gate **cross-checks** GitHub's first-party `workflow-v1.0.json` (advisory
+      signal). (`scripts/schema-crosscheck.sh`, run in resync workflow.)
+- [x] **Golden corpus** (option C): 6 curated real-world known-GOOD workflows + hand-authored
+      known-GOOD + known-BAD cases. Curation surfaced a real SchemaStore false positive
+      (null env values), handled in `src/reconcile.rs`.
+- [x] Resync PR runs linter over corpus (`scripts/run-corpus.sh` in CI), human approves merge.
+- [x] **CLI** binary — the real primitive (lint files/dirs/stdin, exit codes). (`src/main.rs`)
+- [x] **Docker-based GitHub Action** (thin wrapper over the CLI). (`action.yml`, `Dockerfile`)
+
+**MVP is functionally complete.** Remaining v1 hardening: broaden the corpus further,
+and test the Docker action end-to-end in CI.
 
 ## Deferred — the "other 90%" (post-MVP)
 

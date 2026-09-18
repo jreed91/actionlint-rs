@@ -1,0 +1,16 @@
+# Regression fixture for the null-env reconciliation (see src/reconcile.rs).
+# GitHub Actions accepts an env var declared with no value; SchemaStore rejects null.
+# This must lint CLEAN. Mirrors BurntSushi/ripgrep's real CI (`TARGET_FLAGS:`).
+on: push
+env:
+  TARGET_FLAGS:
+  CARGO: cargo
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      JOB_LEVEL_EMPTY:
+    steps:
+      - run: echo hi
+        env:
+          STEP_LEVEL_EMPTY:
