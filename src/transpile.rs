@@ -60,11 +60,16 @@ pub fn transpile(dsl: &Value) -> Result<Transpiled> {
     // `definitions`. Inject them so our `$ref`s resolve. Only add ones the DSL didn't define.
     for (prim, schema) in [
         ("string", json!({ "type": "string" })),
-        ("number", json!({ "type": "number" })),
-        ("boolean", json!({ "type": "boolean" })),
+        // number/boolean self-widen: GitHub accepts a `${{ }}` expression anywhere a scalar
+        // is expected (ADR-0005), so these definitions accept the literal type OR an
+        // expression string.
+        ("number", number_schema()),
+        ("boolean", boolean_schema()),
         ("null", json!({ "type": "null" })),
         ("mapping", json!({ "type": "object" })),
-        ("sequence", json!({ "type": "array" })),
+        // A sequence position can also hold a `${{ }}` expression that resolves to a list at
+        // runtime (e.g. a matrix variable `x: ${{ fromJSON(...) }}`), so `sequence` widens too.
+        ("sequence", json!({ "anyOf": [{ "type": "array" }, expression_schema()] })),
         // `any` matches any value.
         ("any", json!({})),
     ] {
@@ -109,8 +114,8 @@ impl Ctx {
             // A bare-null body: primitive-by-name, else "any".
             Value::Null => match name {
                 "string" => json!({ "type": "string" }),
-                "number" => json!({ "type": "number" }),
-                "boolean" => json!({ "type": "boolean" }),
+                "number" => number_schema(),
+                "boolean" => boolean_schema(),
                 "null" => json!({ "type": "null" }),
                 _ => json!({}),
             },
@@ -134,7 +139,10 @@ impl Ctx {
     /// the transpiled first-party schema stops rejecting valid expression usage.
     fn object_node(&mut self, map: &Map<String, Value>) -> Value {
         let base = self.base_object_node(map);
-        if map.contains_key("context") {
+        // Scalars (boolean/number) already self-widen to accept expressions everywhere (see
+        // `boolean_schema`/`number_schema`), and a string trivially matches an expression —
+        // so only wrap non-scalar bases (one-of / mapping) when the node carries `context`.
+        if map.contains_key("context") && !already_accepts_expression(map) {
             allow_expression(base)
         } else {
             base
@@ -147,10 +155,10 @@ impl Ctx {
             return schema;
         }
         if map.contains_key("number") {
-            return json!({ "type": "number" });
+            return number_schema();
         }
         if map.contains_key("boolean") {
-            return json!({ "type": "boolean" });
+            return boolean_schema();
         }
         if map.contains_key("null") {
             return json!({ "type": "null" });
@@ -301,6 +309,24 @@ fn expression_schema() -> Value {
     json!({ "type": "string", "pattern": r"^\$\{\{(.|[\r\n])*\}\}$" })
 }
 
+/// A boolean value OR a `${{ }}` expression. GitHub accepts an expression anywhere a boolean
+/// is expected (`continue-on-error: ${{ ... }}`, `cancel-in-progress: ${{ ... }}`, ...), so
+/// the transpiled schema must too (ADR-0005).
+fn boolean_schema() -> Value {
+    json!({ "anyOf": [{ "type": "boolean" }, expression_schema()] })
+}
+
+/// A number value OR a `${{ }}` expression (e.g. `timeout-minutes: ${{ inputs.t }}`).
+fn number_schema() -> Value {
+    json!({ "anyOf": [{ "type": "number" }, expression_schema()] })
+}
+
+/// Whether a DSL node's base schema already accepts an expression (a scalar node), so the
+/// node-level context widening would be redundant.
+fn already_accepts_expression(map: &Map<String, Value>) -> bool {
+    map.contains_key("string") || map.contains_key("number") || map.contains_key("boolean")
+}
+
 /// Widen a schema to also accept a `${{ }}` expression string, i.e. "base OR expression".
 ///
 /// We use `anyOf`, not `oneOf`: an expression like `${{ matrix.os }}` is also a valid
@@ -319,8 +345,9 @@ mod tests {
     fn primitive_by_name() {
         let mut c = Ctx::default();
         assert_eq!(c.node_to_schema("string", &Value::Null), json!({"type":"string"}));
-        assert_eq!(c.node_to_schema("number", &Value::Null), json!({"type":"number"}));
-        assert_eq!(c.node_to_schema("boolean", &Value::Null), json!({"type":"boolean"}));
+        // number/boolean self-widen to accept `${{ }}` expressions (ADR-0005).
+        assert_eq!(c.node_to_schema("number", &Value::Null), number_schema());
+        assert_eq!(c.node_to_schema("boolean", &Value::Null), boolean_schema());
         assert_eq!(c.node_to_schema("null", &Value::Null), json!({"type":"null"}));
         // Unknown null body → any.
         assert_eq!(c.node_to_schema("mystery", &Value::Null), json!({}));
@@ -405,25 +432,29 @@ mod tests {
     }
 
     #[test]
-    fn context_annotation_widens_to_accept_expression() {
-        // A node carrying `context` accepts a `${{ }}` expression in addition to its base
-        // type: base string, widened to `anyOf[string, expression]`.
+    fn context_string_is_a_plain_string() {
+        // A `string` base already matches an expression (an expression IS a string), so a
+        // context annotation adds no extra wrapping — it stays a plain string.
         let mut c = Ctx::default();
         let n = json!({ "context": ["github", "inputs"], "string": {} });
-        let s = c.node_to_schema("job-if", &n);
-        let branches = s["anyOf"].as_array().expect("should be anyOf");
-        assert_eq!(branches[0], json!({"type":"string"}));
-        assert_eq!(branches[1]["type"], "string");
-        assert!(branches[1]["pattern"].as_str().unwrap().contains("$"));
+        assert_eq!(c.node_to_schema("job-if", &n), json!({"type":"string"}));
     }
 
     #[test]
-    fn context_boolean_accepts_boolean_or_expression() {
-        // continue-on-error is `{ context: [...], boolean: {} }` → anyOf[boolean, expr].
+    fn boolean_self_widens_to_accept_expression_even_without_context() {
+        // GitHub accepts an expression anywhere a boolean is expected, so `boolean` widens
+        // globally (not just under a context annotation).
         let mut c = Ctx::default();
-        let n = json!({ "context": ["matrix"], "boolean": {} });
-        let s = c.node_to_schema("continue-on-error", &n);
+        let s = c.node_to_schema("x", &json!({ "boolean": {} }));
+        assert_eq!(s, boolean_schema());
         assert_eq!(s["anyOf"][0], json!({"type":"boolean"}));
+        assert!(s["anyOf"][1]["pattern"].is_string());
+    }
+
+    #[test]
+    fn number_self_widens_to_accept_expression() {
+        let mut c = Ctx::default();
+        assert_eq!(c.node_to_schema("x", &json!({ "number": {} })), number_schema());
     }
 
     #[test]
@@ -437,10 +468,14 @@ mod tests {
     }
 
     #[test]
-    fn no_context_means_no_expression_widening() {
+    fn context_mapping_appends_expression_branch() {
+        // A context-annotated mapping (like strategy/concurrency) also accepts a whole-value
+        // expression.
         let mut c = Ctx::default();
-        let n = json!({ "boolean": {} });
-        assert_eq!(c.node_to_schema("x", &n), json!({"type":"boolean"}));
+        let n = json!({ "context": ["matrix"], "mapping": { "properties": {} } });
+        let s = c.node_to_schema("strategy", &n);
+        assert_eq!(s["anyOf"][0]["type"], "object");
+        assert!(s["anyOf"][1]["pattern"].is_string());
     }
 
     #[test]

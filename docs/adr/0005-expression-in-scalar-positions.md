@@ -21,11 +21,22 @@ SchemaStore models the same thing by unioning the field with an `expressionSynta
 
 ## Decision
 
-When a DSL node carries a `context` annotation, widen its transpiled schema to
-**`anyOf[<base schema>, <expression string>]`**, where the expression string matches
-SchemaStore's `expressionSyntax` pattern. Applied to **all** context-annotated nodes
-(scalars, one-ofs, and mappings) — the annotation means expressions are allowed there,
-regardless of base shape.
+Widen the transpiled schema to accept a `${{ }}` expression (matching SchemaStore's
+`expressionSyntax` pattern) as `anyOf[<base>, <expression>]` in two ways:
+
+1. **Globally for scalar/sequence primitives.** `boolean`, `number`, and `sequence`
+   definitions self-widen everywhere they appear (`string` needs nothing — an expression is
+   already a string). GitHub accepts an expression at essentially any value position, so a
+   typed leaf like `concurrency.cancel-in-progress` (boolean), `timeout-minutes` (number), or
+   a matrix variable value (sequence, e.g. `x: ${{ fromJSON(...) }}`) must accept it.
+2. **Per-node for context-annotated non-scalars.** A `context`-annotated `one-of` or
+   `mapping` (e.g. `runs-on`, `strategy`, `concurrency`) is wrapped as `anyOf[<base>, expr]`
+   so the whole value may be an expression. (Scalar nodes already self-widen, so context
+   adds nothing there.)
+
+Scope was expanded from context-only to global-scalar after broadening the cross-validation
+corpus (29 real workflows) surfaced expressions at many typed leaves that a context-only rule
+missed (grafana concurrency, react/prometheus/hass matrix values).
 
 **`anyOf`, not `oneOf`:** an expression like `${{ matrix.os }}` is *also* a valid non-empty
 string, so it matches multiple branches; `oneOf` would reject it as ambiguous

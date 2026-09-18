@@ -97,15 +97,18 @@ pretending otherwise is how this project would mislead its users.
       opens a single PR when either changed (flagging a first-party change as the higher-stakes
       one, since it drives default validation), and verifies before opening the PR that the new
       schemas build + transpile + pass the corpus gate.
-- [x] **Cross-validation gate over a broader corpus** (`tests/xval.rs`, `corpus/xval/`):
-      14 real workflows from popular repos validated under BOTH schemas; a checked-in
+- [x] **Cross-validation gate over a broad corpus** (`tests/xval.rs`, `corpus/xval/`):
+      29 real workflows across ecosystems (Rust/Node/Python/Go/containers/deploy/pages)
+      validated under BOTH schemas; a checked-in
       baseline (`corpus/xval/BASELINE.txt`) records accepted disagreements, and the gate
       fails on any drift (new or resolved). Wired into CI; proven to catch drift.
-- [x] **Expression-in-scalar-position fidelity gap fixed** (ADR-0005). The transpiler now
-      widens any `context`-annotated node to `anyOf[<base>, <${{ }}> expression]`, so the
-      first-party schema accepts expressions wherever GitHub does (`continue-on-error`,
-      `runs-on`, `timeout-minutes`, `if`, ...). All 14 cross-validation workflows now pass
-      under BOTH schemas; the baseline is empty.
+- [x] **Expression-in-value-position fidelity fixed** (ADR-0005). The transpiler widens
+      boolean/number/sequence globally, and context-annotated one-of/mapping nodes per-node,
+      to `anyOf[<base>, <${{ }}> expression]`. Broadening the corpus to 29 workflows drove
+      expanding this from context-only to global-scalar (it found expressions at typed leaves
+      like `concurrency.cancel-in-progress` and matrix values). Only remaining cross-schema
+      divergence is `requests-tests.yml` — SchemaStore wrongly requires `strategy.matrix`;
+      first-party (correctly) does not (baselined).
 
 ## Honest note
 Roughly **~10%** of actionlint's user value (structure) is what the thesis addresses.

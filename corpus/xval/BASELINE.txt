@@ -11,10 +11,9 @@
 #
 # --- Accepted disagreements ---
 #
-# (none)
-#
-# History: axum-ci.yml and clap-ci.yml previously diverged on
-# `continue-on-error: ${{ <expr> }}` / `runs-on: ${{ <expr> }}` — the transpiled
-# first-party schema rejected the expression form. Fixed by widening context-annotated
-# nodes to accept `${{ }}` expressions (transpile::allow_expression, ADR-0005). The two
-# schemas now agree on all workflows in this corpus.
+# requests-tests.yml: uses `strategy: { fail-fast: true }` with NO `matrix`. SchemaStore
+#   REJECTS this (it marks `matrix` required under `strategy`); GitHub's first-party schema
+#   ACCEPTS it (matrix is optional — a matrix-less strategy is valid). Here first-party (the
+#   default) is the more correct of the two; the divergence is SchemaStore being overly
+#   strict, not a transpiler bug. Tracked as a genuine schema difference.
+requests-tests.yml

@@ -148,4 +148,3 @@ mod tests {
         assert!(build_validator_for(SchemaSource::FirstParty).is_ok());
     }
 }
-
