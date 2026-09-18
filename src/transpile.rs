@@ -25,8 +25,11 @@
 //!     A property value may be a bare string (ref), or `{ "type": T, "required": bool, ... }`.
 //! - `{ "one-of": [a, b, ...] }` → `{"oneOf": [<a>, <b>, ...]}`.
 //! - `{ "type": T }` (as a value) → `<T>` (a ref or inline).
-//! - `context: [...]` — expression-context annotation, NOT structural; dropped. A node that
-//!   is *only* a context annotation with an empty `string: {}` still becomes `type: string`.
+//! - `context: [...]` — an expression-context annotation. It carries no *structural* shape,
+//!   but its presence means GitHub allows a `${{ }}` expression in that position, so a node
+//!   carrying `context` is widened to `anyOf[<base>, <expression string>]` (see
+//!   `allow_expression`). A node that is *only* a context annotation with `string: {}`
+//!   becomes `anyOf[string, expression]`.
 
 use std::collections::BTreeSet;
 
@@ -122,10 +125,24 @@ impl Ctx {
         }
     }
 
-    /// Handle an object-shaped node by dispatching on its DSL keyword.
+    /// Handle an object-shaped node: transpile its structural keyword, then — if the node
+    /// carries a `context` annotation — widen it to also accept a `${{ }}` expression.
+    ///
+    /// A `context: [...]` annotation on a DSL node means GitHub allows an expression in that
+    /// position instead of the literal value (e.g. `continue-on-error: ${{ matrix.x }}`,
+    /// `timeout-minutes: ${{ inputs.t }}`). We model that as `anyOf[<base>, <expression>]` so
+    /// the transpiled first-party schema stops rejecting valid expression usage.
     fn object_node(&mut self, map: &Map<String, Value>) -> Value {
-        // `context` is an expression annotation, not structural — ignore it, but keep
-        // processing sibling keywords (a node can be `{ context: [...], string: {} }`).
+        let base = self.base_object_node(map);
+        if map.contains_key("context") {
+            allow_expression(base)
+        } else {
+            base
+        }
+    }
+
+    /// Transpile an object node by its structural keyword, ignoring any `context` annotation.
+    fn base_object_node(&mut self, map: &Map<String, Value>) -> Value {
         if let Some(schema) = self.string_node(map) {
             return schema;
         }
@@ -278,6 +295,22 @@ fn ref_to(name: &str) -> Value {
     json!({ "$ref": format!("#/definitions/{name}") })
 }
 
+/// A JSON-Schema fragment matching a whole-value `${{ ... }}` expression string. Mirrors
+/// SchemaStore's `expressionSyntax` pattern so both schemas treat expressions the same way.
+fn expression_schema() -> Value {
+    json!({ "type": "string", "pattern": r"^\$\{\{(.|[\r\n])*\}\}$" })
+}
+
+/// Widen a schema to also accept a `${{ }}` expression string, i.e. "base OR expression".
+///
+/// We use `anyOf`, not `oneOf`: an expression like `${{ matrix.os }}` is also a valid
+/// non-empty string, so it would match *two* branches of a `oneOf` (the string branch and
+/// the expression branch) and be rejected as ambiguous (`oneOfMultipleValid`). `anyOf`
+/// accepts a value that matches one or more branches, which is what we want here.
+fn allow_expression(base: Value) -> Value {
+    json!({ "anyOf": [base, expression_schema()] })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,11 +405,42 @@ mod tests {
     }
 
     #[test]
-    fn context_annotation_is_ignored() {
-        // A node that is only a context annotation + empty string opts → plain string.
+    fn context_annotation_widens_to_accept_expression() {
+        // A node carrying `context` accepts a `${{ }}` expression in addition to its base
+        // type: base string, widened to `anyOf[string, expression]`.
         let mut c = Ctx::default();
         let n = json!({ "context": ["github", "inputs"], "string": {} });
-        assert_eq!(c.node_to_schema("job-if", &n), json!({"type":"string"}));
+        let s = c.node_to_schema("job-if", &n);
+        let branches = s["anyOf"].as_array().expect("should be anyOf");
+        assert_eq!(branches[0], json!({"type":"string"}));
+        assert_eq!(branches[1]["type"], "string");
+        assert!(branches[1]["pattern"].as_str().unwrap().contains("$"));
+    }
+
+    #[test]
+    fn context_boolean_accepts_boolean_or_expression() {
+        // continue-on-error is `{ context: [...], boolean: {} }` → anyOf[boolean, expr].
+        let mut c = Ctx::default();
+        let n = json!({ "context": ["matrix"], "boolean": {} });
+        let s = c.node_to_schema("continue-on-error", &n);
+        assert_eq!(s["anyOf"][0], json!({"type":"boolean"}));
+    }
+
+    #[test]
+    fn context_one_of_appends_expression_branch() {
+        // A context-annotated one-of (like runs-on) becomes anyOf[<the oneOf>, expression].
+        let mut c = Ctx::default();
+        let n = json!({ "context": ["matrix"], "one-of": ["a", "b"] });
+        let s = c.node_to_schema("runs-on", &n);
+        assert!(s["anyOf"][0]["oneOf"].is_array(), "base oneOf preserved under anyOf");
+        assert!(s["anyOf"][1]["pattern"].is_string(), "expression branch added");
+    }
+
+    #[test]
+    fn no_context_means_no_expression_widening() {
+        let mut c = Ctx::default();
+        let n = json!({ "boolean": {} });
+        assert_eq!(c.node_to_schema("x", &n), json!({"type":"boolean"}));
     }
 
     #[test]
@@ -481,4 +545,3 @@ mod tests {
         }
     }
 }
-

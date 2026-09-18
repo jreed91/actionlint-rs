@@ -100,9 +100,12 @@ pretending otherwise is how this project would mislead its users.
 - [x] **Cross-validation gate over a broader corpus** (`tests/xval.rs`, `corpus/xval/`):
       14 real workflows from popular repos validated under BOTH schemas; a checked-in
       baseline (`corpus/xval/BASELINE.txt`) records accepted disagreements, and the gate
-      fails on any drift (new or resolved). Seeded baseline: axum-ci/clap-ci diverge on
-      `continue-on-error: ${{ expr }}` (first-party types it strictly boolean). Wired into
-      CI; proven to catch drift.
+      fails on any drift (new or resolved). Wired into CI; proven to catch drift.
+- [x] **Expression-in-scalar-position fidelity gap fixed** (ADR-0005). The transpiler now
+      widens any `context`-annotated node to `anyOf[<base>, <${{ }}> expression]`, so the
+      first-party schema accepts expressions wherever GitHub does (`continue-on-error`,
+      `runs-on`, `timeout-minutes`, `if`, ...). All 14 cross-validation workflows now pass
+      under BOTH schemas; the baseline is empty.
 
 ## Honest note
 Roughly **~10%** of actionlint's user value (structure) is what the thesis addresses.
