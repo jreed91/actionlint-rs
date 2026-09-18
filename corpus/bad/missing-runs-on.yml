@@ -1,0 +1,6 @@
+# A normal job without runs-on is a structural error — must be flagged.
+on: push
+jobs:
+  build:
+    steps:
+      - run: echo "no runs-on here"

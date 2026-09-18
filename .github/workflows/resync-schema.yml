@@ -1,0 +1,61 @@
+# The "D" pipeline (ADR-0001, ADR-0003): watch the upstream SchemaStore schema and open a
+# PR when it changes. The PR runs CI (including the golden-corpus regression gate) and a
+# human approves the merge — NEVER auto-merged.
+#
+# It also cross-checks GitHub's first-party workflow-v1.0.json as an advisory signal
+# (option C): a disagreement is surfaced in the PR body for review, not auto-applied.
+name: resync-schema
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  resync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch upstream SchemaStore schema
+        run: |
+          curl -sfL https://json.schemastore.org/github-workflow.json \
+            -o schemas/github-workflow.json.new
+
+      - name: Fetch GitHub first-party schema (advisory cross-check)
+        run: |
+          curl -sfL https://raw.githubusercontent.com/actions/languageservices/main/workflow-parser/src/workflow-v1.0.json \
+            -o /tmp/workflow-v1.0.json || echo "first-party fetch failed (advisory only)"
+
+      - name: Detect change
+        id: diff
+        run: |
+          if cmp -s schemas/github-workflow.json schemas/github-workflow.json.new; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            rm -f schemas/github-workflow.json.new
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            mv schemas/github-workflow.json.new schemas/github-workflow.json
+          fi
+
+      - name: Open PR (gated by CI + human review — never auto-merge)
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: resync/schemastore
+          title: "resync: update vendored SchemaStore workflow schema"
+          body: |
+            Automated schema resync from SchemaStore.
+
+            **Do not merge without reviewing the golden-corpus diff in CI.** This PR
+            changes the structural schema baked into the binary; the corpus regression
+            gate must be green and the results diff reviewed (ADR-0003).
+
+            The advisory cross-check against GitHub's first-party `workflow-v1.0.json`
+            runs in CI; any disagreement is a signal to investigate, not a blocker.
+          labels: |
+            schema-resync
+            needs-corpus-review

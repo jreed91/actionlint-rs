@@ -1,0 +1,30 @@
+[package]
+name = "actionlint-rs"
+version = "0.1.0"
+edition = "2021"
+description = "A schema-driven GitHub Actions workflow linter (Rust). Structural validation against the SchemaStore schema, with precise source positions."
+license = "MIT"
+repository = "https://github.com/jreed/actionlint-rs"
+readme = "README.md"
+keywords = ["github-actions", "linter", "yaml", "json-schema", "ci"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "actionlint-rs"
+path = "src/main.rs"
+
+[dependencies]
+# JSON Schema validation engine (draft-07). Errors located by JSON Pointer via instance_path().
+jsonschema = { version = "0.56", default-features = false }
+# Span-preserving YAML parser (MarkedYaml carries source positions). Pre-1.0; API may churn.
+saphyr = "0.0.12"
+# JSON value model fed to the validator.
+serde_json = "1.0"
+# CLI parsing.
+clap = { version = "4.6", features = ["derive"] }
+# Ergonomic error handling at the binary boundary.
+anyhow = "1.0"
+
+[dev-dependencies]
+# Golden-corpus / snapshot-style assertions for the regression gate.
+insta = "1"

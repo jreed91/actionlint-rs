@@ -1,0 +1,19 @@
+# v1 GitHub Action: a thin Docker wrapper over the actionlint-rs CLI.
+# Composite + multi-target release binaries are deferred (see docs/ROADMAP.md).
+name: "actionlint-rs"
+description: "Schema-driven GitHub Actions workflow linter (structural checks)."
+branding:
+  icon: "check-circle"
+  color: "purple"
+inputs:
+  files:
+    description: >-
+      Space-separated workflow files to lint. If empty, discovers
+      .github/workflows/*.{yml,yaml} in the repository.
+    required: false
+    default: ""
+runs:
+  using: "docker"
+  image: "Dockerfile"
+  args:
+    - ${{ inputs.files }}

@@ -1,0 +1,31 @@
+# CI: build, test, corpus gate, and coverage gate.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --verbose
+      - run: cargo test --verbose
+      - name: Golden corpus regression gate
+        run: ./scripts/run-corpus.sh
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Library coverage gate (see docs/coverage.md)
+        # Policy: 100% of *reachable* library code. main.rs (CLI glue) is excluded and
+        # covered by integration tests; a small set of unreachable defensive arms and
+        # assert-failure strings put the practical floor at 98%.
+        run: cargo llvm-cov --lib --fail-under-lines 98 --fail-under-regions 98

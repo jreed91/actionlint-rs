@@ -1,0 +1,7 @@
+# `on` must be a string, array, or mapping of events — a bare integer is invalid.
+on: 42
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi

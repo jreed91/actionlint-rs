@@ -1,0 +1,16 @@
+# Exercises a matrix strategy and opaque ${{ }} expressions — all structurally valid,
+# so this must produce ZERO diagnostics (expressions are opaque in v1).
+name: test-matrix
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [18, 20]
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "node ${{ matrix.node }} on ${{ matrix.os }}"

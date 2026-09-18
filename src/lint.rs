@@ -1,0 +1,155 @@
+//! Orchestration: parse a workflow, validate its structure, and produce diagnostics.
+//!
+//! v1 scope is the structural layer only (see CONTEXT.md / docs/ROADMAP.md). Expressions
+//! (`${{ }}`) are opaque; a structurally-valid workflow with a broken expression passes.
+
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use jsonschema::Validator;
+
+use crate::diagnostic::{Diagnostic, Position};
+use crate::span;
+use crate::yaml;
+
+/// Lint one workflow file's source text against the compiled schema.
+///
+/// `path` is used only for diagnostic display; `source` is the file contents.
+pub fn lint_source(validator: &Validator, path: &Path, source: &str) -> Result<Vec<Diagnostic>> {
+    let parsed = yaml::parse(source)
+        .with_context(|| format!("could not parse {}", path.display()))?;
+
+    let mut diagnostics: Vec<Diagnostic> = validator
+        .iter_errors(&parsed.json)
+        .map(|error| {
+            // `instance_path()` renders as an RFC-6901 JSON Pointer (e.g. /jobs/build/runs-on).
+            let pointer = error.instance_path().to_string();
+            let pos = span::position_for_pointer(&parsed.marked, &pointer)
+                // Fall back to the document start if the pointer doesn't resolve.
+                .unwrap_or_else(|| Position::new(1, 1));
+            Diagnostic::new(
+                path.to_path_buf(),
+                pos,
+                pointer,
+                error.to_string(),
+            )
+        })
+        .collect();
+
+    // Stable, source-order output: sort by position, then by pointer for determinism.
+    diagnostics.sort_by(|a, b| {
+        (a.pos.line, a.pos.col, &a.pointer).cmp(&(b.pos.line, b.pos.col, &b.pointer))
+    });
+    Ok(diagnostics)
+}
+
+/// Lint a file on disk.
+pub fn lint_file(validator: &Validator, path: &Path) -> Result<Vec<Diagnostic>> {
+    let source = std::fs::read_to_string(path)
+        .with_context(|| format!("could not read {}", path.display()))?;
+    lint_source(validator, path, &source)
+}
+
+/// Lint stdin, labeling diagnostics as coming from `<stdin>`.
+pub fn lint_stdin(validator: &Validator, source: &str) -> Result<Vec<Diagnostic>> {
+    lint_source(validator, &PathBuf::from("<stdin>"), source)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema;
+
+    fn validator() -> Validator {
+        schema::build_validator().unwrap()
+    }
+
+    #[test]
+    fn valid_workflow_has_no_diagnostics() {
+        let src = "\
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+";
+        let diags = lint_source(&validator(), Path::new("wf.yml"), src).unwrap();
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    }
+
+    #[test]
+    fn missing_runs_on_is_flagged() {
+        // A normal job requires runs-on; omitting it is a structural error.
+        let src = "\
+on: push
+jobs:
+  build:
+    steps:
+      - run: echo hi
+";
+        let diags = lint_source(&validator(), Path::new("wf.yml"), src).unwrap();
+        assert!(!diags.is_empty(), "expected a diagnostic for missing runs-on");
+    }
+
+    #[test]
+    fn lint_file_reads_from_disk() {
+        let dir = std::env::temp_dir().join(format!("alr-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("wf.yml");
+        std::fs::write(&file, "on: push\njobs:\n  b:\n    steps: []\n").unwrap();
+        let diags = lint_file(&validator(), &file).unwrap();
+        assert!(!diags.is_empty(), "job without runs-on should be flagged");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn lint_file_errors_on_missing_file() {
+        let err = lint_file(&validator(), Path::new("/no/such/file.yml")).unwrap_err();
+        assert!(err.to_string().contains("could not read"));
+    }
+
+    #[test]
+    fn lint_stdin_labels_source_as_stdin() {
+        let diags = lint_stdin(&validator(), "on: push\njobs:\n  b:\n    steps: []\n").unwrap();
+        assert!(!diags.is_empty());
+        assert_eq!(diags[0].file.to_string_lossy(), "<stdin>");
+    }
+
+    #[test]
+    fn lint_source_errors_on_unparseable_yaml() {
+        let err = lint_source(&validator(), Path::new("wf.yml"), "on: [push").unwrap_err();
+        assert!(err.to_string().contains("could not parse"));
+    }
+
+    #[test]
+    fn diagnostics_are_sorted_by_position() {
+        // Two distinct structural problems; output must be position-ordered.
+        let src = "on: 42\njobs: []\n";
+        let diags = lint_source(&validator(), Path::new("wf.yml"), src).unwrap();
+        assert!(diags.len() >= 2, "expected multiple diagnostics: {diags:?}");
+        for pair in diags.windows(2) {
+            let a = (pair[0].pos.line, pair[0].pos.col);
+            let b = (pair[1].pos.line, pair[1].pos.col);
+            assert!(a <= b, "diagnostics not sorted: {a:?} then {b:?}");
+        }
+    }
+
+    #[test]
+    fn expressions_are_opaque_in_v1() {
+        // A broken expression inside ${{ }} must NOT be flagged in v1 (documented limit).
+        let src = "\
+on: push
+jobs:
+  build:
+    runs-on: ${{ this.is.not.validated }}
+    steps:
+      - run: echo hi
+";
+        let diags = lint_source(&validator(), Path::new("wf.yml"), src).unwrap();
+        assert!(
+            diags.is_empty(),
+            "v1 should treat expressions as opaque, got: {diags:?}"
+        );
+    }
+}
