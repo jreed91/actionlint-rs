@@ -1,7 +1,7 @@
 //! Diagnostics: what we report to the user, and how we render them.
 //!
-//! v1 output is human-readable `file:line:col: message` only. SARIF/JSON is deferred
-//! (see docs/ROADMAP.md).
+//! The human renderer (`Display`) emits `file:line:col: message`. SARIF output
+//! (`crate::sarif`) additionally uses `end` and `rule_id`.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -24,8 +24,14 @@ impl Position {
 pub struct Diagnostic {
     pub file: PathBuf,
     pub pos: Position,
+    /// End of the offending node's span, when known. Used for the SARIF region end; the
+    /// human renderer only uses the start position.
+    pub end: Option<Position>,
+    /// A stable rule identifier (e.g. `required`, `type`), used as the SARIF `ruleId` so
+    /// results group into rules. Defaults to `structure`.
+    pub rule_id: String,
     /// The JSON Pointer into the document that the schema error referenced
-    /// (e.g. `/jobs/build/runs-on`). Kept for debugging and future SARIF output.
+    /// (e.g. `/jobs/build/runs-on`). Kept for debugging and SARIF fingerprints.
     pub pointer: String,
     pub message: String,
 }
@@ -40,9 +46,23 @@ impl Diagnostic {
         Diagnostic {
             file: file.into(),
             pos,
+            end: None,
+            rule_id: "structure".to_string(),
             pointer: pointer.into(),
             message: message.into(),
         }
+    }
+
+    /// Set the end position of the finding's span.
+    pub fn with_end(mut self, end: Option<Position>) -> Self {
+        self.end = end;
+        self
+    }
+
+    /// Set the rule id for the finding.
+    pub fn with_rule_id(mut self, rule_id: impl Into<String>) -> Self {
+        self.rule_id = rule_id.into();
+        self
     }
 }
 

@@ -19,6 +19,8 @@ removing safety code or writing tests that never actually execute them:
 | `src/yaml.rs` | `to_json` `_ =>` arm | saphyr's default loader parses scalars into `Value`, resolves aliases in place, and errors out of `parse()` rather than emitting `Representation`/`Alias`/`BadValue`. |
 | `src/yaml.rs` | `key_to_string` `_ =>` arm | Same loader invariant; workflow mapping keys are always scalars. |
 | `src/span.rs` | `key_matches` `_ =>` arm | Same. |
+| `src/span.rs` | `range_for_pointer` zero-width arm | saphyr reports a real end range for the node kinds we hit; the `(start, start)` fallback is defensive. |
+| `src/lint.rs` | unresolvable-pointer `None` arm | Validator errors always carry a resolvable instance path; the document-root fallback is defensive. |
 | `src/schema.rs` | `assert!` message | The failure-message expression only executes when the assertion fails (i.e. never, in a passing suite). |
 | `src/lint.rs`  | `assert!` message | Same. |
 | `src/humanize.rs` | `assert!` message | Same. |

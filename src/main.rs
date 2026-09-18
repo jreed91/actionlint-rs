@@ -14,7 +14,8 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::Parser;
 
-use actionlint_rs::{diagnostic::Diagnostic, lint, schema};
+use actionlint_rs::{diagnostic::Diagnostic, lint, sarif, schema};
+use clap::ValueEnum;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -25,6 +26,18 @@ struct Cli {
     /// Workflow files to lint. Use `-` for stdin. If omitted, discovers
     /// `.github/workflows/*.{yml,yaml}` under the current directory.
     files: Vec<PathBuf>,
+
+    /// Output format.
+    #[arg(long, value_enum, default_value_t = Format::Human)]
+    format: Format,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+enum Format {
+    /// Human-readable `file:line:col: message`.
+    Human,
+    /// SARIF 2.1.0 JSON, for GitHub code-scanning inline annotations.
+    Sarif,
 }
 
 fn main() -> ExitCode {
@@ -70,6 +83,11 @@ fn run() -> Result<bool> {
 
         if targets.is_empty() {
             eprintln!("actionlint-rs: no workflow files found under .github/workflows/");
+            // In SARIF mode still emit a valid (empty) document so an upload step has
+            // something well-formed to consume.
+            if cli.format == Format::Sarif {
+                println!("{}", sarif::to_sarif(&[]));
+            }
             return Ok(false);
         }
 
@@ -78,8 +96,15 @@ fn run() -> Result<bool> {
         }
     }
 
-    for d in &all {
-        println!("{d}");
+    match cli.format {
+        Format::Human => {
+            for d in &all {
+                println!("{d}");
+            }
+        }
+        Format::Sarif => {
+            println!("{}", sarif::to_sarif(&all));
+        }
     }
     Ok(!all.is_empty())
 }

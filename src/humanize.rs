@@ -13,10 +13,11 @@ use jsonschema::error::{TypeKind, ValidationErrorKind};
 use jsonschema::ValidationError;
 
 /// A humanized message plus the JSON Pointer it should be anchored at (which may be deeper
-/// than the top-level error's path).
+/// than the top-level error's path) and a stable rule id for grouping (SARIF `ruleId`).
 pub struct Humanized {
     pub pointer: String,
     pub message: String,
+    pub rule_id: String,
 }
 
 /// Humanize one top-level validation error.
@@ -27,8 +28,25 @@ pub fn humanize(error: &ValidationError<'_>) -> Humanized {
         other => Humanized {
             pointer,
             message: render_leaf(other, &error.instance_path().to_string()),
+            rule_id: rule_id_for(other),
         },
     }
+}
+
+/// A stable, kebab-case rule identifier for an error kind, used as the SARIF `ruleId` so
+/// findings group into rules. All are under the `structure` layer for v1.
+fn rule_id_for(kind: &ValidationErrorKind) -> String {
+    let slug = match kind {
+        ValidationErrorKind::Required { .. } => "required",
+        ValidationErrorKind::Type { .. } => "type",
+        ValidationErrorKind::AdditionalProperties { .. } => "additional-properties",
+        ValidationErrorKind::Enum { .. } => "enum",
+        ValidationErrorKind::Pattern { .. } => "pattern",
+        ValidationErrorKind::OneOfNotValid { .. }
+        | ValidationErrorKind::OneOfMultipleValid { .. } => "one-of",
+        _ => "structure",
+    };
+    format!("structure/{slug}")
 }
 
 /// Choose the most relevant branch of a failed `oneOf` and render it.
@@ -63,6 +81,7 @@ fn humanize_one_of(pointer: &str, context: &[Vec<ValidationError<'_>>]) -> Human
                 kind => Humanized {
                     pointer: leaf.instance_path().to_string(),
                     message: render_leaf(kind, &leaf.instance_path().to_string()),
+                    rule_id: rule_id_for(kind),
                 },
             }
         }
@@ -70,6 +89,7 @@ fn humanize_one_of(pointer: &str, context: &[Vec<ValidationError<'_>>]) -> Human
         None => Humanized {
             pointer: pointer.to_string(),
             message: "value does not match any allowed form".to_string(),
+            rule_id: "structure/one-of".to_string(),
         },
     }
 }
@@ -215,6 +235,55 @@ mod tests {
     fn wrong_scalar_type_is_readable() {
         let h = first_message("on: 42\njobs:\n  b:\n    runs-on: x\n    steps: [{run: hi}]\n");
         assert_eq!(h.message, "`on` must be a string");
+    }
+
+    #[test]
+    fn rule_ids_cover_the_common_kinds() {
+        use jsonschema::error::TypeKind;
+        use jsonschema::JsonType;
+        use serde_json::json;
+        assert_eq!(
+            rule_id_for(&ValidationErrorKind::Required { property: json!("x") }),
+            "structure/required"
+        );
+        assert_eq!(
+            rule_id_for(&ValidationErrorKind::Type {
+                kind: TypeKind::Single(JsonType::String)
+            }),
+            "structure/type"
+        );
+        assert_eq!(
+            rule_id_for(&ValidationErrorKind::AdditionalProperties { unexpected: vec![] }),
+            "structure/additional-properties"
+        );
+        assert_eq!(
+            rule_id_for(&ValidationErrorKind::Enum { options: json!([]) }),
+            "structure/enum"
+        );
+        assert_eq!(
+            rule_id_for(&ValidationErrorKind::Pattern { pattern: "x".into() }),
+            "structure/pattern"
+        );
+        // Both oneOf variants map to the same rule id (covers the OneOfMultipleValid arm).
+        assert_eq!(
+            rule_id_for(&ValidationErrorKind::OneOfNotValid { context: vec![] }),
+            "structure/one-of"
+        );
+        assert_eq!(
+            rule_id_for(&ValidationErrorKind::OneOfMultipleValid { context: vec![] }),
+            "structure/one-of"
+        );
+        // Any other kind falls back to the generic structure rule.
+        assert_eq!(
+            rule_id_for(&ValidationErrorKind::MaxLength { limit: 3 }),
+            "structure/structure"
+        );
+    }
+
+    #[test]
+    fn humanized_carries_rule_id() {
+        let h = first_message("on: push\njobs:\n  b:\n    steps: [{run: hi}]\n");
+        assert_eq!(h.rule_id, "structure/required");
     }
 
     #[test]

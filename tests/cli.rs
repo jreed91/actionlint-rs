@@ -102,3 +102,40 @@ fn missing_file_is_usage_error_exit_two() {
     let out = Command::new(bin()).arg("/no/such/wf.yml").output().unwrap();
     assert_eq!(out.status.code(), Some(2));
 }
+
+#[test]
+fn sarif_format_emits_valid_sarif_and_exit_one_on_problems() {
+    let dir = tmpdir("sarif");
+    let f = dir.join("wf.yml");
+    std::fs::write(&f, "on: push\njobs:\n  b:\n    steps: [{run: hi}]\n").unwrap();
+    let out = Command::new(bin())
+        .arg(&f)
+        .arg("--format")
+        .arg("sarif")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).expect("SARIF output must be valid JSON");
+    assert_eq!(v["version"], "2.1.0");
+    assert_eq!(v["runs"][0]["results"][0]["ruleId"], "structure/required");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn sarif_format_on_clean_file_is_valid_and_exit_zero() {
+    let dir = tmpdir("sarif-clean");
+    let f = dir.join("wf.yml");
+    std::fs::write(
+        &f,
+        "on: push\njobs:\n  b:\n    runs-on: ubuntu-latest\n    steps: [{run: hi}]\n",
+    )
+    .unwrap();
+    let out = Command::new(bin()).arg(&f).arg("--format").arg("sarif").output().unwrap();
+    assert!(out.status.success());
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert_eq!(v["runs"][0]["results"].as_array().unwrap().len(), 0);
+    std::fs::remove_dir_all(&dir).ok();
+}

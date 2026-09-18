@@ -37,9 +37,10 @@ See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the path to full coverage and
 CLI (the primitive):
 
 ```sh
-actionlint-rs                       # lint .github/workflows/*.{yml,yaml}
-actionlint-rs path/to/workflow.yml  # lint specific files
-cat workflow.yml | actionlint-rs -  # lint stdin
+actionlint-rs                        # lint .github/workflows/*.{yml,yaml}
+actionlint-rs path/to/workflow.yml   # lint specific files
+cat workflow.yml | actionlint-rs -   # lint stdin
+actionlint-rs --format sarif         # emit SARIF 2.1.0 (for code scanning)
 ```
 
 Exit codes: `0` clean, `1` problems found, `2` usage/IO error.
@@ -49,6 +50,18 @@ As a GitHub Action (v1 = Docker-based):
 ```yaml
 - uses: your-org/actionlint-rs@v1
   # optional: files: ".github/workflows/ci.yml"
+```
+
+### Inline PR annotations via SARIF
+
+Emit SARIF and upload it to GitHub code scanning to get inline annotations on PRs:
+
+```yaml
+- name: Lint workflows (SARIF)
+  run: actionlint-rs --format sarif > actionlint.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: actionlint.sarif
 ```
 
 ## Development

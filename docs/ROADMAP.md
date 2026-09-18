@@ -67,7 +67,11 @@ pretending otherwise is how this project would mislead its users.
         "missing runs-on"; could detect `with:`/`secrets:` as a reusable-job signal.
 
 ### Distribution / ecosystem parity (post-MVP)
-- [ ] **SARIF / JSON output** + problem matcher — enables inline PR annotations.
+- [x] **SARIF 2.1.0 output** (`--format sarif`, `src/sarif.rs`) — enables inline PR
+      annotations via `github/codeql-action/upload-sarif`. Each finding carries a grouped
+      `ruleId` (structure/required, /type, ...), a full region (start+end from the span),
+      and a stable partial fingerprint. Verified against GitHub's SARIF-support docs.
+  - [ ] Follow-up: plain JSON output; a problem-matcher path as a lighter alternative.
 - [ ] `-ignore` filtering.
 - [ ] Composite action + multi-target release binaries (cross-compilation) — faster,
       cross-OS UX vs the v1 Docker action.

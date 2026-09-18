@@ -26,10 +26,14 @@ pub fn lint_source(validator: &Validator, path: &Path, source: &str) -> Result<V
             // Turn the raw schema error into plain language, re-anchoring to the deepest
             // relevant node (humanize may descend into `oneOf` branches for a better path).
             let h = humanize::humanize(&error);
-            let pos = span::position_for_pointer(&parsed.marked, &h.pointer)
-                // Fall back to the document start if the pointer doesn't resolve.
-                .unwrap_or_else(|| Position::new(1, 1));
+            // Resolve the full span; fall back to the document start if it doesn't resolve.
+            let (pos, end) = match span::range_for_pointer(&parsed.marked, &h.pointer) {
+                Some((start, end)) => (start, Some(end)),
+                None => (Position::new(1, 1), None),
+            };
             Diagnostic::new(path.to_path_buf(), pos, h.pointer, h.message)
+                .with_end(end)
+                .with_rule_id(h.rule_id)
         })
         .collect();
 
