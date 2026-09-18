@@ -11,11 +11,11 @@ pipeline.
 ## What v1 does (and honestly, what it doesn't)
 
 **v1 is a thesis proof, not yet a daily replacement for actionlint.** It validates the
-**structure** of workflow files against the community
-[SchemaStore](https://json.schemastore.org/github-workflow.json) schema (JSON Schema
-draft-07) and reports precise `file:line:col` diagnostics in plain language — e.g. a job
-missing `runs-on` reports `` `build` is missing required key `runs-on` `` rather than raw
-JSON-Schema `oneOf` jargon (see `src/humanize.rs`).
+**structure** of workflow files against GitHub's own first-party schema (transpiled to JSON
+Schema draft-07; `--schema schemastore` opts out to the community schema) and reports
+precise `file:line:col` diagnostics in plain language — e.g. a job missing `runs-on` reports
+`` `build` is missing required key `runs-on` `` rather than raw JSON-Schema `oneOf` jargon
+(see `src/humanize.rs`).
 
 v1 **does not** (yet) check:
 - expressions inside `${{ }}` — they are treated as opaque strings;
@@ -41,16 +41,17 @@ actionlint-rs                          # lint .github/workflows/*.{yml,yaml}
 actionlint-rs path/to/workflow.yml     # lint specific files
 cat workflow.yml | actionlint-rs -     # lint stdin
 actionlint-rs --format sarif           # emit SARIF 2.1.0 (for code scanning)
-actionlint-rs --schema first-party     # validate against GitHub's first-party schema
+actionlint-rs --schema schemastore     # validate against the community SchemaStore schema
 ```
 
 ### Schema source
 
-By default the structural layer is validated against the community SchemaStore schema.
-`--schema first-party` instead validates against **GitHub's own first-party schema**
+By default the structural layer is validated against **GitHub's own first-party schema**
 (`actions/languageservices` `workflow-v1.0.json`), transpiled to JSON Schema at runtime
 (`src/transpile.rs`) — the option-B "north star": validation sourced from GitHub's own
-structural model rather than a community one.
+structural model rather than a community one. Pass `--schema schemastore` to opt out and
+use the community [SchemaStore](https://json.schemastore.org/github-workflow.json) schema
+instead.
 
 Exit codes: `0` clean, `1` problems found, `2` usage/IO error.
 

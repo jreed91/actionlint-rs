@@ -22,22 +22,28 @@ pub const FIRST_PARTY_DSL_JSON: &str = include_str!("../schemas/workflow-v1.0.js
 /// Which structural schema source to validate against.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum SchemaSource {
-    /// Community SchemaStore JSON Schema (default).
+    /// GitHub's first-party DSL, transpiled to JSON Schema. The default: validation is
+    /// sourced from GitHub's own structural model (the option-B north star, ADR-0001).
     #[default]
-    SchemaStore,
-    /// GitHub's first-party DSL, transpiled to JSON Schema.
     FirstParty,
+    /// Community SchemaStore JSON Schema (opt-out via `--schema schemastore`).
+    SchemaStore,
 }
 
-/// Compile the default (SchemaStore) schema into a reusable draft-07 validator.
+/// Compile a validator for the default schema source (first-party).
 pub fn build_validator() -> Result<Validator> {
+    build_validator_for(SchemaSource::default())
+}
+
+/// Compile the SchemaStore JSON Schema into a reusable draft-07 validator.
+pub fn build_schemastore_validator() -> Result<Validator> {
     build_validator_from(WORKFLOW_SCHEMA_JSON)
 }
 
 /// Compile a validator for the given schema source.
 pub fn build_validator_for(source: SchemaSource) -> Result<Validator> {
     match source {
-        SchemaSource::SchemaStore => build_validator(),
+        SchemaSource::SchemaStore => build_schemastore_validator(),
         SchemaSource::FirstParty => build_first_party_validator(),
     }
 }
@@ -74,9 +80,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn embedded_schema_is_valid_json_and_compiles() {
-        // Guards against a corrupt vendored file landing via the resync pipeline.
-        build_validator().expect("embedded schema should compile as draft-07");
+    fn embedded_schemastore_schema_is_valid_json_and_compiles() {
+        // Guards against a corrupt vendored SchemaStore file landing via the resync pipeline.
+        build_schemastore_validator().expect("embedded schema should compile as draft-07");
+    }
+
+    #[test]
+    fn default_validator_is_first_party() {
+        // `move to the default`: the default source is now the first-party schema.
+        assert_eq!(SchemaSource::default(), SchemaSource::FirstParty);
+        build_validator().expect("default (first-party) validator should build");
     }
 
     #[test]

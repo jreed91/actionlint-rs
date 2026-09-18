@@ -31,9 +31,9 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = Format::Human)]
     format: Format,
 
-    /// Structural schema source: the community SchemaStore schema (default), or GitHub's
-    /// first-party schema transpiled to JSON Schema (the option-B path).
-    #[arg(long, value_enum, default_value_t = SchemaArg::Schemastore)]
+    /// Structural schema source: GitHub's first-party schema transpiled to JSON Schema
+    /// (default), or the community SchemaStore schema.
+    #[arg(long, value_enum, default_value_t = SchemaArg::FirstParty)]
     schema: SchemaArg,
 }
 

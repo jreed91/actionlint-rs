@@ -89,8 +89,11 @@ pretending otherwise is how this project would mislead its users.
 - [x] Proven usable on real workflows: all good-corpus files pass, all bad flagged, under
       BOTH schema sources. Surfaced (and reconciled) the first-party schema's stricter
       scalar typing for `env:`/`with:` (ADR-0004).
-  - [ ] Follow-up: default to first-party once soak-tested; add first-party to the resync
-        pipeline + a first-party cross-validation gate in the corpus.
+- [x] **First-party is now the DEFAULT schema source** (`SchemaSource::default()` =
+      `FirstParty`; `--schema schemastore` opts out). The corpus gate runs first-party by
+      default, giving the north star ongoing regression coverage.
+  - [ ] Follow-up: add first-party (DSL) fetch to the resync pipeline; a first-party vs
+        SchemaStore cross-validation gate over the corpus.
 
 ## Honest note
 Roughly **~10%** of actionlint's user value (structure) is what the thesis addresses.

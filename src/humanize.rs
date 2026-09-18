@@ -144,9 +144,16 @@ fn render_leaf(kind: &ValidationErrorKind, pointer: &str) -> String {
     match kind {
         ValidationErrorKind::Required { property } => {
             let prop = property.as_str().unwrap_or("a required property");
-            match at {
-                Some(name) => format!("`{name}` is missing required key `{prop}`"),
-                None => format!("missing required key `{prop}`"),
+            // For an array element (pointer ends in an index, e.g. a step) name the
+            // container so the message reads "an item in `steps` ..." rather than "`steps`
+            // is missing ...", which would wrongly blame the array itself.
+            if let Some(container) = array_element_container(pointer) {
+                format!("an item in `{container}` is missing required key `{prop}`")
+            } else {
+                match at {
+                    Some(name) => format!("`{name}` is missing required key `{prop}`"),
+                    None => format!("missing required key `{prop}`"),
+                }
             }
         }
         ValidationErrorKind::Type { kind } => {
@@ -192,6 +199,21 @@ fn field_name(pointer: &str) -> Option<String> {
         .map(|s| s.replace("~1", "/").replace("~0", "~"))
 }
 
+/// If the pointer's *last* segment is a numeric array index (an element, e.g.
+/// `/jobs/b/steps/0`), returns the name of the enclosing array (`steps`); otherwise `None`.
+fn array_element_container(pointer: &str) -> Option<String> {
+    let mut segs = pointer.rsplit('/');
+    let last = segs.next()?;
+    if last.parse::<usize>().is_err() {
+        return None; // not an array element
+    }
+    let container = segs.next()?;
+    if container.is_empty() {
+        return None;
+    }
+    Some(container.replace("~1", "/").replace("~0", "~"))
+}
+
 fn type_kind_str(kind: &TypeKind) -> String {
     match kind {
         TypeKind::Single(t) => a_or_an(&t.to_string()),
@@ -218,11 +240,18 @@ mod tests {
     use crate::schema;
     use crate::yaml;
 
-    fn first_message(src: &str) -> Humanized {
-        let v = schema::build_validator().unwrap();
+    // These tests exercise the humanizer against a specific schema's error shapes. Pin the
+    // source explicitly (rather than the process default) so they test the humanizer, not
+    // whichever schema happens to be the default.
+    fn first_message_with(src: &str, source: schema::SchemaSource) -> Humanized {
+        let v = schema::build_validator_for(source).unwrap();
         let p = yaml::parse(src).unwrap();
         let err = v.iter_errors(&p.json).next().expect("expected an error");
         humanize(&err)
+    }
+
+    fn first_message(src: &str) -> Humanized {
+        first_message_with(src, schema::SchemaSource::SchemaStore)
     }
 
     #[test]
@@ -296,9 +325,9 @@ mod tests {
     }
 
     #[test]
-    fn unexpected_step_key_names_the_key_and_reanchors() {
-        // The bogus key is inside steps[0]: the message should name it and point there,
-        // not surface the misleading "missing uses" from the wrong job branch.
+    fn unexpected_step_key_names_the_key_schemastore() {
+        // Under SchemaStore, a bogus step key is reported as an unexpected property, named
+        // and re-anchored into steps — not the misleading "missing uses" from a wrong branch.
         let h = first_message(
             "on: push\njobs:\n  b:\n    runs-on: x\n    steps: [{bogus: 1}]\n",
         );
@@ -309,6 +338,23 @@ mod tests {
         );
         assert!(h.pointer.contains("steps"), "pointer: {}", h.pointer);
         assert!(!h.message.contains("uses"), "should not blame missing uses: {}", h.message);
+    }
+
+    #[test]
+    fn bad_step_under_first_party_reports_missing_action_key() {
+        // GitHub's first-party schema does not emit an "additionalProperties" signal for a
+        // bogus step key; the best available message is that the step lacks a required action
+        // key (run/uses/...). It must still be re-anchored to the step, phrased as an item.
+        let h = first_message_with(
+            "on: push\njobs:\n  b:\n    runs-on: x\n    steps: [{bogus: 1}]\n",
+            schema::SchemaSource::FirstParty,
+        );
+        assert!(h.pointer.contains("steps"), "pointer: {}", h.pointer);
+        assert!(
+            h.message.starts_with("an item in `steps` is missing required key"),
+            "got: {}",
+            h.message
+        );
     }
 
     #[test]
@@ -369,6 +415,17 @@ mod tests {
     }
 
     #[test]
+    fn array_element_container_detects_indices() {
+        assert_eq!(array_element_container("/jobs/b/steps/0").as_deref(), Some("steps"));
+        assert_eq!(array_element_container("/on/2").as_deref(), Some("on"));
+        // Not an array element (last segment is a key).
+        assert_eq!(array_element_container("/jobs/build/runs-on"), None);
+        // Index with no container.
+        assert_eq!(array_element_container("/0"), None);
+        assert_eq!(array_element_container(""), None);
+    }
+
+    #[test]
     fn article_selection() {
         assert_eq!(a_or_an("string"), "a string");
         assert_eq!(a_or_an("Array"), "an array");
@@ -415,4 +472,5 @@ mod tests {
         assert_eq!(h.pointer, "/x");
     }
 }
+
 
