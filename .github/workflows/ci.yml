@@ -29,3 +29,43 @@ jobs:
         # covered by integration tests; a small set of unreachable defensive arms and
         # assert-failure strings put the practical floor at 98%.
         run: cargo llvm-cov --lib --fail-under-lines 98 --fail-under-regions 98
+
+  docker-action:
+    # End-to-end test of the v1 distribution: build the image and exercise the action the
+    # way GitHub invokes it (Docker container over the workspace), covering the default
+    # (empty-input -> discovery) path and both exit codes.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build action image
+        run: docker build -t actionlint-rs:ci .
+
+      - name: Repo's own workflows lint clean (dogfood, exit 0)
+        run: |
+          docker run --rm -v "$PWD:/github/workspace" -w /github/workspace \
+            actionlint-rs:ci ""
+
+      - name: Explicit good file exits 0
+        run: |
+          docker run --rm -v "$PWD:/github/workspace" -w /github/workspace \
+            actionlint-rs:ci corpus/good/minimal.yml
+
+      - name: Broken workflow is detected (expect exit 1)
+        run: |
+          work="$(mktemp -d)"
+          mkdir -p "$work/.github/workflows"
+          printf 'on: push\njobs:\n  b:\n    steps: [{run: hi}]\n' \
+            > "$work/.github/workflows/broken.yml"
+          if docker run --rm -v "$work:/github/workspace" -w /github/workspace \
+               actionlint-rs:ci ""; then
+            echo "::error::linter should have failed on the broken workflow"
+            exit 1
+          fi
+          echo "broken workflow correctly detected (non-zero exit)"
+
+      - name: Action runs via action.yml (composite invocation)
+        # Exercises action.yml itself (inputs, args wiring), not just the raw container.
+        uses: ./
+        with:
+          files: corpus/good/minimal.yml

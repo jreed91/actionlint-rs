@@ -45,7 +45,12 @@ fn main() -> ExitCode {
 
 /// Returns `Ok(true)` if any lint problems were reported.
 fn run() -> Result<bool> {
-    let cli = Cli::parse();
+    // Drop empty-string arguments before parsing. The Docker action passes
+    // `${{ inputs.files }}`, which becomes a single empty arg `""` when the (optional)
+    // `files` input is unset — clap rejects an empty positional value, so filtering it here
+    // makes the default action invocation fall through to workflow discovery.
+    let args = std::env::args_os().filter(|a| !a.is_empty());
+    let cli = Cli::parse_from(args);
     let validator = schema::build_validator()?;
 
     let mut all: Vec<Diagnostic> = Vec::new();

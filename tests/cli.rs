@@ -77,6 +77,27 @@ fn no_workflows_found_is_not_an_error() {
 }
 
 #[test]
+fn empty_string_arg_falls_through_to_discovery() {
+    // The Docker action passes `${{ inputs.files }}`, which is an empty arg `""` when the
+    // input is unset. It must behave like "no args" (discover), not error.
+    let dir = tmpdir("emptyarg");
+    let wf = dir.join(".github").join("workflows");
+    std::fs::create_dir_all(&wf).unwrap();
+    std::fs::write(
+        wf.join("ci.yml"),
+        "on: push\njobs:\n  b:\n    runs-on: ubuntu-latest\n    steps: [{run: hi}]\n",
+    )
+    .unwrap();
+    let out = Command::new(bin()).arg("").current_dir(&dir).output().unwrap();
+    assert!(
+        out.status.success(),
+        "empty arg should discover, not error. stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn missing_file_is_usage_error_exit_two() {
     let out = Command::new(bin()).arg("/no/such/wf.yml").output().unwrap();
     assert_eq!(out.status.code(), Some(2));

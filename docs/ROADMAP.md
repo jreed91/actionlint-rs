@@ -22,8 +22,14 @@ pretending otherwise is how this project would mislead its users.
 - [x] **CLI** binary — the real primitive (lint files/dirs/stdin, exit codes). (`src/main.rs`)
 - [x] **Docker-based GitHub Action** (thin wrapper over the CLI). (`action.yml`, `Dockerfile`)
 
-**MVP is functionally complete.** Remaining v1 hardening: broaden the corpus further,
-and test the Docker action end-to-end in CI.
+- [x] **Docker action tested end-to-end in CI** (`.github/workflows/ci.yml` `docker-action`
+      job): builds the image, runs it over the workspace (default empty-input → discovery,
+      exit 0), an explicit good file, a broken workflow (expect exit 1), and via `uses: ./`
+      to exercise `action.yml` wiring. Fixed a real bug it surfaced: the default action
+      invocation passed an empty-string arg that clap rejected — now filtered to fall
+      through to discovery.
+
+**MVP is complete.** Remaining optional v1 hardening: broaden the corpus further.
 
 ## Deferred — the "other 90%" (post-MVP)
 
