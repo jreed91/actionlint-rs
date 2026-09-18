@@ -10,6 +10,7 @@
 //! binary operators `< <= > >= == != && ||`, and parentheses.
 
 mod ast;
+pub mod availability;
 pub mod builtins;
 mod check;
 mod lexer;
@@ -17,7 +18,8 @@ mod parser;
 pub mod ty;
 
 pub use ast::{BinaryOp, Expr, UnaryOp};
-pub use check::{check, CheckError};
+pub use availability::AvailabilityTable;
+pub use check::{check, check_with_availability, CheckError};
 pub use lexer::{lex, Token, TokenKind};
 pub use parser::{parse, ParseError};
 pub use ty::Type;

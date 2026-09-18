@@ -11,11 +11,25 @@
 //! through block/folded/quoted scalars is fragile with start-only spans.
 
 use saphyr::MarkedYaml;
+use std::sync::OnceLock;
+
 use serde_json::Value;
 
 use crate::diagnostic::{Diagnostic, Position};
-use crate::expr;
+use crate::expr::{self, AvailabilityTable};
+use crate::schema::FIRST_PARTY_DSL_JSON;
 use crate::span;
+
+/// The context-availability table, derived once from the embedded first-party DSL.
+fn availability() -> &'static AvailabilityTable {
+    static TABLE: OnceLock<AvailabilityTable> = OnceLock::new();
+    TABLE.get_or_init(|| match serde_json::from_str::<Value>(FIRST_PARTY_DSL_JSON) {
+        Ok(dsl) => AvailabilityTable::from_dsl(&dsl),
+        // A bad embedded DSL is caught elsewhere (schema tests); degrade to no availability
+        // restriction rather than panic.
+        Err(_) => AvailabilityTable::default(),
+    })
+}
 
 /// Produce expression diagnostics for a parsed workflow.
 ///
@@ -79,11 +93,18 @@ fn check_string(
     // Resolve the containing scalar's position once; all its expressions anchor there.
     let pos = span::position_for_pointer(marked, pointer).unwrap_or_else(|| Position::new(1, 1));
 
+    // If this position constrains context availability, check against the allowed set.
+    let allowed = availability().allowed_for_pointer(pointer);
+
     for src in exprs {
         // Parse errors and type errors are both reported; a parse error precludes checking.
         match expr::parse(&src) {
             Ok(ast) => {
-                for err in expr::check(&ast) {
+                let errs = match allowed {
+                    Some(set) => expr::check_with_availability(&ast, set),
+                    None => expr::check(&ast),
+                };
+                for err in errs {
                     out.push(
                         Diagnostic::new(
                             path.to_path_buf(),

@@ -18,8 +18,10 @@ precise `file:line:col` diagnostics in plain language — e.g. a job missing `ru
 (see `src/humanize.rs`).
 
 It also type-checks `${{ }}` expressions — unknown contexts (`gihtub.sha`), unknown
-properties (`runner.oss`), unknown functions, wrong arity, and syntax errors — anchored at
-the containing value (see `src/expr/`, `src/expr_lint.rs`).
+properties (`runner.oss`), unknown functions, wrong arity, syntax errors, and context
+availability by position (e.g. `secrets` is not available in `runs-on`) — anchored at the
+containing value (see `src/expr/`, `src/expr_lint.rs`). The availability table is derived
+from GitHub's first-party DSL, so it resyncs with the schema.
 
 Still **does not** (yet) check:
 - context/property availability or dataflow (`steps.x.outputs`, `needs`, `secrets`);

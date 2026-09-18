@@ -47,8 +47,12 @@ pretending otherwise is how this project would mislead its users.
       `${{ }}` in a workflow string is parsed + type-checked; diagnostics anchored at the
       containing scalar. On by default; ZERO false positives across the 29-workflow xval
       corpus. (Precise intra-string column is a future refinement.)
-- [ ] Context **availability by position** (which contexts are valid under which keys;
-      step-output existence via `steps.<id>.outputs`).
+- [x] Context **availability by position** (`src/expr/availability.rs`, step 4): DSL-derived
+      table (position → allowed contexts, from the DSL's own `context:` annotations, so it
+      resyncs) + a pointer→position classifier; the checker flags a context used where it
+      isn't available (e.g. `secrets` in `runs-on`). On by default; ZERO false positives
+      across the 29-workflow xval corpus.
+  - [ ] Follow-up: step-output existence (`steps.<id>.outputs.<name>`), needs-output typing.
 - [ ] **Context availability + dataflow** — which contexts/props are valid under which
       keys; step-output existence; `secrets`/`needs` availability. (Scraped from
       github/docs `contexts.md` — resync-able for the *table*, but the *analysis* is

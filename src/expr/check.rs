@@ -6,6 +6,8 @@
 //! unambiguous and high-value, and falls back to `Any` (no error) wherever a shape is
 //! genuinely unknown, so it does not false-positive on valid workflows.
 
+use std::collections::BTreeSet;
+
 use super::ast::{BinaryOp, Expr, UnaryOp};
 use super::builtins;
 use super::ty::{PropertyResult, Type};
@@ -26,114 +28,148 @@ impl CheckError {
 
 /// Type-check an expression, returning any semantic errors found (empty = clean).
 pub fn check(expr: &Expr) -> Vec<CheckError> {
-    let mut errors = Vec::new();
-    infer(expr, &mut errors);
-    errors
+    Checker { errors: Vec::new(), allowed: None }.run(expr)
 }
 
-/// Infer the type of `expr`, pushing any errors encountered. Returns `Any` on error so a
-/// single mistake doesn't cascade into spurious follow-on errors.
-fn infer(expr: &Expr, errors: &mut Vec<CheckError>) -> Type {
-    match expr {
-        Expr::Null => Type::Null,
-        Expr::Bool(_) => Type::Bool,
-        Expr::Number(_) => Type::Number,
-        Expr::Str(_) => Type::String,
+/// Type-check an expression, additionally enforcing that every context root used is in the
+/// `allowed` set (context availability for a position). A context that is otherwise valid but
+/// not allowed here is reported.
+pub fn check_with_availability(expr: &Expr, allowed: &BTreeSet<String>) -> Vec<CheckError> {
+    Checker { errors: Vec::new(), allowed: Some(allowed) }.run(expr)
+}
 
-        Expr::Ident(name) => match builtins::context_type(name) {
-            Some(t) => t,
-            None => {
-                errors.push(CheckError::new(format!(
-                    "unknown context `{name}` (known contexts: {})",
-                    builtins::context_names().join(", ")
-                )));
-                Type::Any
-            }
-        },
+struct Checker<'a> {
+    errors: Vec<CheckError>,
+    allowed: Option<&'a BTreeSet<String>>,
+}
 
-        Expr::Index { target, index } => {
-            let target_ty = infer(target, errors);
-            // A string literal index is a property access; anything else is a dynamic index.
-            if let Expr::Str(name) = index.as_ref() {
-                // Property access on an array is the object-filter projection (`a.*.b` and
-                // also `steps.*.outputs`): collect the property from each element. We don't
-                // track element property types precisely, so the projection is Any.
-                if matches!(target_ty, Type::Array(_)) {
-                    return Type::array(Type::Any);
-                }
-                match target_ty.property(name) {
-                    PropertyResult::Type(t) => t,
-                    PropertyResult::UnknownProperty => {
-                        errors.push(CheckError::new(format!(
-                            "`{name}` is not a valid property of {}",
-                            describe_receiver(target)
-                        )));
-                        Type::Any
-                    }
-                    PropertyResult::NotAnObject => {
-                        errors.push(CheckError::new(format!(
-                            "cannot access property `{name}` on a {}",
-                            target_ty.describe()
-                        )));
-                        Type::Any
-                    }
-                }
-            } else {
-                // Dynamic index (`a[expr]`): type-check the index expression; result is Any
-                // (we don't track element types through dynamic indexing).
-                infer(index, errors);
-                Type::Any
-            }
-        }
+impl<'a> Checker<'a> {
+    fn run(mut self, expr: &Expr) -> Vec<CheckError> {
+        self.infer(expr);
+        self.errors
+    }
 
-        Expr::Star(target) => {
-            infer(target, errors);
-            // The object-filter star projects to an array of the projected values.
-            Type::array(Type::Any)
-        }
+    /// Infer the type of `expr`, pushing any errors encountered. Returns `Any` on error so a
+    /// single mistake doesn't cascade into spurious follow-on errors.
+    fn infer(&mut self, expr: &Expr) -> Type {
+        match expr {
+            Expr::Null => Type::Null,
+            Expr::Bool(_) => Type::Bool,
+            Expr::Number(_) => Type::Number,
+            Expr::Str(_) => Type::String,
 
-        Expr::Call { name, args } => {
-            // Type-check every argument regardless of whether the function is known.
-            for a in args {
-                infer(a, errors);
-            }
-            match builtins::function_sig(name) {
-                Some(sig) => {
-                    let n = args.len();
-                    let under = n < sig.min_args;
-                    let over = sig.max_args.is_some_and(|max| n > max);
-                    if under || over {
-                        errors.push(CheckError::new(format!(
-                            "function `{name}` called with {n} argument{} ({})",
-                            if n == 1 { "" } else { "s" },
-                            arity_desc(&sig)
-                        )));
-                    }
-                    function_return_type(name)
+            Expr::Ident(name) => match builtins::context_type(name) {
+                Some(t) => {
+                    self.check_availability(name);
+                    t
                 }
                 None => {
-                    errors.push(CheckError::new(format!(
-                        "unknown function `{name}` (known functions: {})",
-                        builtins::function_names().join(", ")
-                    )));
+                    self.push(format!(
+                        "unknown context `{name}` (known contexts: {})",
+                        builtins::context_names().join(", ")
+                    ));
+                    Type::Any
+                }
+            },
+
+            Expr::Index { target, index } => {
+                let target_ty = self.infer(target);
+                // A string literal index is a property access; else a dynamic index.
+                if let Expr::Str(name) = index.as_ref() {
+                    // Property access on an array is the object-filter projection (`a.*.b`,
+                    // `steps.*.outputs`): collect from each element. Projection is Any.
+                    if matches!(target_ty, Type::Array(_)) {
+                        return Type::array(Type::Any);
+                    }
+                    match target_ty.property(name) {
+                        PropertyResult::Type(t) => t,
+                        PropertyResult::UnknownProperty => {
+                            self.push(format!(
+                                "`{name}` is not a valid property of {}",
+                                describe_receiver(target)
+                            ));
+                            Type::Any
+                        }
+                        PropertyResult::NotAnObject => {
+                            self.push(format!(
+                                "cannot access property `{name}` on a {}",
+                                target_ty.describe()
+                            ));
+                            Type::Any
+                        }
+                    }
+                } else {
+                    // Dynamic index (`a[expr]`): check the index; result is Any.
+                    self.infer(index);
                     Type::Any
                 }
             }
-        }
 
-        Expr::Unary { op, operand } => {
-            infer(operand, errors);
-            match op {
-                UnaryOp::Not => Type::Bool,
+            Expr::Star(target) => {
+                self.infer(target);
+                Type::array(Type::Any)
+            }
+
+            Expr::Call { name, args } => {
+                for a in args {
+                    self.infer(a);
+                }
+                match builtins::function_sig(name) {
+                    Some(sig) => {
+                        let n = args.len();
+                        let under = n < sig.min_args;
+                        let over = sig.max_args.is_some_and(|max| n > max);
+                        if under || over {
+                            self.push(format!(
+                                "function `{name}` called with {n} argument{} ({})",
+                                if n == 1 { "" } else { "s" },
+                                arity_desc(&sig)
+                            ));
+                        }
+                        function_return_type(name)
+                    }
+                    None => {
+                        self.push(format!(
+                            "unknown function `{name}` (known functions: {})",
+                            builtins::function_names().join(", ")
+                        ));
+                        Type::Any
+                    }
+                }
+            }
+
+            Expr::Unary { op, operand } => {
+                self.infer(operand);
+                match op {
+                    UnaryOp::Not => Type::Bool,
+                }
+            }
+
+            Expr::Binary { op, left, right } => {
+                self.infer(left);
+                self.infer(right);
+                match op {
+                    BinaryOp::And | BinaryOp::Or => Type::Any, // && / || return an operand
+                    _ => Type::Bool,                           // comparisons/equality → boolean
+                }
             }
         }
+    }
 
-        Expr::Binary { op, left, right } => {
-            infer(left, errors);
-            infer(right, errors);
-            match op {
-                BinaryOp::And | BinaryOp::Or => Type::Any, // GitHub && / || return an operand
-                _ => Type::Bool,                            // comparisons/equality → boolean
+    fn push(&mut self, message: String) {
+        self.errors.push(CheckError::new(message));
+    }
+
+    /// If an availability set is active, flag a known context used outside it.
+    fn check_availability(&mut self, name: &str) {
+        if let Some(allowed) = self.allowed {
+            if !allowed.contains(name) {
+                let mut v: Vec<&str> = allowed.iter().map(|s| s.as_str()).collect();
+                v.sort_unstable();
+                self.push(format!(
+                    "context `{name}` is not available here (available: {})",
+                    v.join(", ")
+                ));
             }
         }
     }
@@ -279,6 +315,36 @@ mod tests {
         assert!(errors("github.event.commits.*.message").is_empty());
         let e = errors("bogus.*.x");
         assert_eq!(e.len(), 1);
+    }
+
+    fn avail_errors(src: &str, allowed: &[&str]) -> Vec<String> {
+        let set: BTreeSet<String> = allowed.iter().map(|s| s.to_string()).collect();
+        check_with_availability(&parse(src).unwrap(), &set)
+            .into_iter()
+            .map(|e| e.message)
+            .collect()
+    }
+
+    #[test]
+    fn availability_flags_disallowed_context() {
+        // runs-on allows github/matrix but not secrets.
+        let e = avail_errors("secrets.TOKEN", &["github", "matrix"]);
+        assert_eq!(e.len(), 1, "got: {:?}", e);
+        assert!(e[0].contains("`secrets` is not available here"), "got: {:?}", e);
+        assert!(e[0].contains("available: github, matrix"), "got: {:?}", e);
+    }
+
+    #[test]
+    fn availability_allows_permitted_context() {
+        assert!(avail_errors("github.sha", &["github", "matrix"]).is_empty());
+    }
+
+    #[test]
+    fn availability_still_reports_unknown_context() {
+        // An unknown context is flagged regardless of the allowed set (single error).
+        let e = avail_errors("bogus.x", &["github"]);
+        assert_eq!(e.len(), 1);
+        assert!(e[0].contains("unknown context"));
     }
 
     #[test]
