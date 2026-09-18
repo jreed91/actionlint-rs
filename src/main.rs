@@ -30,6 +30,28 @@ struct Cli {
     /// Output format.
     #[arg(long, value_enum, default_value_t = Format::Human)]
     format: Format,
+
+    /// Structural schema source: the community SchemaStore schema (default), or GitHub's
+    /// first-party schema transpiled to JSON Schema (the option-B path).
+    #[arg(long, value_enum, default_value_t = SchemaArg::Schemastore)]
+    schema: SchemaArg,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+enum SchemaArg {
+    /// Community SchemaStore schema.
+    Schemastore,
+    /// GitHub's first-party workflow-v1.0 DSL, transpiled to JSON Schema.
+    FirstParty,
+}
+
+impl From<SchemaArg> for schema::SchemaSource {
+    fn from(a: SchemaArg) -> Self {
+        match a {
+            SchemaArg::Schemastore => schema::SchemaSource::SchemaStore,
+            SchemaArg::FirstParty => schema::SchemaSource::FirstParty,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -64,7 +86,7 @@ fn run() -> Result<bool> {
     // makes the default action invocation fall through to workflow discovery.
     let args = std::env::args_os().filter(|a| !a.is_empty());
     let cli = Cli::parse_from(args);
-    let validator = schema::build_validator()?;
+    let validator = schema::build_validator_for(cli.schema.into())?;
 
     let mut all: Vec<Diagnostic> = Vec::new();
 

@@ -9,5 +9,6 @@ pub mod lint;
 pub mod reconcile;
 pub mod sarif;
 pub mod schema;
+pub mod transpile;
 pub mod span;
 pub mod yaml;

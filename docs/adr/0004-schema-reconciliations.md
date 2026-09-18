@@ -24,7 +24,11 @@ Introduce a single, centralized, documented reconciliation step (`src/reconcile.
 applied to the parsed JSON *before* schema validation. Each reconciliation is a knowing,
 narrowly-scoped exception where SchemaStore is provably stricter than GitHub.
 
-First rule: **null env values → empty string** (workflow-, job-, and step-level `env`).
+Rule: **scalar coercion under `env:` and `with:`** — stringify null/number/boolean values
+(GitHub coerces `RUST_BACKTRACE: 1` → `"1"`, `fetch-depth: 0` → `"0"`, `submodules: true` →
+`"true"`, `FOO:` → `""`). This subsumes the original null-env rule and also unblocks the
+first-party (option-B) schema, which types these values as `string` and so would otherwise
+flag nearly every real workflow.
 
 ## Consequences
 

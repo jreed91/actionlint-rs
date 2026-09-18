@@ -37,11 +37,20 @@ See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the path to full coverage and
 CLI (the primitive):
 
 ```sh
-actionlint-rs                        # lint .github/workflows/*.{yml,yaml}
-actionlint-rs path/to/workflow.yml   # lint specific files
-cat workflow.yml | actionlint-rs -   # lint stdin
-actionlint-rs --format sarif         # emit SARIF 2.1.0 (for code scanning)
+actionlint-rs                          # lint .github/workflows/*.{yml,yaml}
+actionlint-rs path/to/workflow.yml     # lint specific files
+cat workflow.yml | actionlint-rs -     # lint stdin
+actionlint-rs --format sarif           # emit SARIF 2.1.0 (for code scanning)
+actionlint-rs --schema first-party     # validate against GitHub's first-party schema
 ```
+
+### Schema source
+
+By default the structural layer is validated against the community SchemaStore schema.
+`--schema first-party` instead validates against **GitHub's own first-party schema**
+(`actions/languageservices` `workflow-v1.0.json`), transpiled to JSON Schema at runtime
+(`src/transpile.rs`) — the option-B "north star": validation sourced from GitHub's own
+structural model rather than a community one.
 
 Exit codes: `0` clean, `1` problems found, `2` usage/IO error.
 

@@ -77,13 +77,20 @@ pretending otherwise is how this project would mislead its users.
       cross-OS UX vs the v1 Docker action.
 - [ ] pre-commit hook, Docker image, editor integrations, WASM playground.
 
-## North star (option B) — the compelling post-MVP direction
-- [ ] **DSL→JSON-Schema transpiler** in the resync pipeline: fetch GitHub's first-party
-      `actions/languageservices` `workflow-v1.0.json`, transpile its custom DSL
-      (`mapping`/`sequence`/`one-of`/`loose-key-type`) into JSON Schema, embed, and
-      validate against THAT. Makes validation itself first-party-sourced — the strongest
-      form of "schema-driven, tracks GitHub." Owns a transpiler that can break on new DSL
-      keywords (that's the cost). (ADR-0001.)
+## North star (option B) — DONE (first cut)
+- [x] **DSL→JSON-Schema transpiler** (`src/transpile.rs`): full-fidelity transpile of
+      GitHub's first-party `workflow-v1.0.json` DSL (all keywords: `string`/`number`/
+      `boolean`/`null`, `mapping`, `sequence`/`item-type`, `one-of`, `constant`,
+      `allowed-values`, `require-non-empty`, `loose-key/value-type`, `$ref`s, `required`,
+      injected implicit primitives). Validated against the real 304-definition DSL with zero
+      unsupported constructs.
+- [x] Wired into the linter: `--schema first-party` (`schema::build_first_party_validator`),
+      embedded via `include_str!`. Makes validation first-party-sourced (ADR-0001).
+- [x] Proven usable on real workflows: all good-corpus files pass, all bad flagged, under
+      BOTH schema sources. Surfaced (and reconciled) the first-party schema's stricter
+      scalar typing for `env:`/`with:` (ADR-0004).
+  - [ ] Follow-up: default to first-party once soak-tested; add first-party to the resync
+        pipeline + a first-party cross-validation gate in the corpus.
 
 ## Honest note
 Roughly **~10%** of actionlint's user value (structure) is what the thesis addresses.
