@@ -50,10 +50,13 @@ pretending otherwise is how this project would mislead its users.
       constant `if:` conditions.
 
 ### Diagnostic quality (post-MVP polish)
-- [ ] **`oneOf` error messages are user-hostile.** JSON Schema reports "not valid under any
-      of the schemas listed in the 'oneOf' keyword" for e.g. a job missing `runs-on`.
-      Needs message rewriting/heuristics to say what actually went wrong (map common
-      workflow `oneOf` branches to human messages). Known limitation, not a thesis blocker.
+- [x] **`oneOf` error messages humanized** (`src/humanize.rs`). Descends failed `oneOf`
+      branches, picks the branch the user intended (deepest error path wins; wrong branches
+      fail shallow by rejecting the instance's own keys), and renders the leaf in plain
+      language, re-anchored to the deepest node. E.g. a job missing `runs-on` now reports
+      `` `build` is missing required key `runs-on` `` instead of the schema jargon.
+  - [ ] Follow-up: ambiguous job branches (only `with:`, no `runs-on`/`uses`) report
+        "missing runs-on"; could detect `with:`/`secrets:` as a reusable-job signal.
 
 ### Distribution / ecosystem parity (post-MVP)
 - [ ] **SARIF / JSON output** + problem matcher — enables inline PR annotations.

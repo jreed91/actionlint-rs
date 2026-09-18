@@ -4,6 +4,7 @@
 //! precise `file:line:col` diagnostics. See CONTEXT.md and docs/ for the design.
 
 pub mod diagnostic;
+pub mod humanize;
 pub mod lint;
 pub mod schema;
 pub mod span;

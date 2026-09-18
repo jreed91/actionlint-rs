@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use jsonschema::Validator;
 
 use crate::diagnostic::{Diagnostic, Position};
+use crate::humanize;
 use crate::span;
 use crate::yaml;
 
@@ -22,17 +23,13 @@ pub fn lint_source(validator: &Validator, path: &Path, source: &str) -> Result<V
     let mut diagnostics: Vec<Diagnostic> = validator
         .iter_errors(&parsed.json)
         .map(|error| {
-            // `instance_path()` renders as an RFC-6901 JSON Pointer (e.g. /jobs/build/runs-on).
-            let pointer = error.instance_path().to_string();
-            let pos = span::position_for_pointer(&parsed.marked, &pointer)
+            // Turn the raw schema error into plain language, re-anchoring to the deepest
+            // relevant node (humanize may descend into `oneOf` branches for a better path).
+            let h = humanize::humanize(&error);
+            let pos = span::position_for_pointer(&parsed.marked, &h.pointer)
                 // Fall back to the document start if the pointer doesn't resolve.
                 .unwrap_or_else(|| Position::new(1, 1));
-            Diagnostic::new(
-                path.to_path_buf(),
-                pos,
-                pointer,
-                error.to_string(),
-            )
+            Diagnostic::new(path.to_path_buf(), pos, h.pointer, h.message)
         })
         .collect();
 
@@ -153,3 +150,4 @@ jobs:
         );
     }
 }
+

@@ -13,7 +13,9 @@ pipeline.
 **v1 is a thesis proof, not yet a daily replacement for actionlint.** It validates the
 **structure** of workflow files against the community
 [SchemaStore](https://json.schemastore.org/github-workflow.json) schema (JSON Schema
-draft-07) and reports precise `file:line:col` diagnostics.
+draft-07) and reports precise `file:line:col` diagnostics in plain language — e.g. a job
+missing `runs-on` reports `` `build` is missing required key `runs-on` `` rather than raw
+JSON-Schema `oneOf` jargon (see `src/humanize.rs`).
 
 v1 **does not** (yet) check:
 - expressions inside `${{ }}` — they are treated as opaque strings;

@@ -21,6 +21,7 @@ removing safety code or writing tests that never actually execute them:
 | `src/span.rs` | `key_matches` `_ =>` arm | Same. |
 | `src/schema.rs` | `assert!` message | The failure-message expression only executes when the assertion fails (i.e. never, in a passing suite). |
 | `src/lint.rs`  | `assert!` message | Same. |
+| `src/humanize.rs` | `assert!` message | Same. |
 
 These are documented rather than deleted: keeping the defensive arms is worth more than a
 vanity 100%. If saphyr's loader behavior changes in a future upgrade, the arms become

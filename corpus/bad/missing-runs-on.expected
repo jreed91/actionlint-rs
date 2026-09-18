@@ -1,3 +1,6 @@
 Job `build` is a normal job but has no `runs-on`. The schema's job `oneOf`
 (normalJob requires runs-on; reusableWorkflowCallJob requires uses) rejects it.
 Gate assertion (v1): at least one diagnostic. Anchored at the `build` job mapping.
+
+Humanized message:
+  `build` is missing required key `runs-on`
