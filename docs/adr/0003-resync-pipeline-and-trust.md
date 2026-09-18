@@ -42,3 +42,14 @@ against a real-workflow corpus before it can land."
 - **Auto-merge if unit tests pass:** rejected — misses behavioral regressions from schema
   changes, which are exactly the risk.
 - **Manual review, no corpus:** rejected — undercuts the D selling point and doesn't scale.
+
+## Update (2026-09-18): two schemas, first-party default
+
+Since option B landed and first-party became the default validator, the pipeline now tracks
+**both** vendored schemas: `github-workflow.json` (SchemaStore) and `workflow-v1.0.json`
+(GitHub's first-party DSL). A single combined PR is opened when *either* changes (chosen
+over per-source PRs to reduce triage load). The same trust gate applies — the golden corpus
+runs against the **default (first-party)** schema in CI, so a bad first-party upstream is
+caught behaviorally; the resync job additionally verifies the new schemas build + transpile
+before opening the PR, and the PR body flags a first-party change as the higher-stakes one
+(it drives default validation for every user).

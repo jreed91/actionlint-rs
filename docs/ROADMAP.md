@@ -92,8 +92,12 @@ pretending otherwise is how this project would mislead its users.
 - [x] **First-party is now the DEFAULT schema source** (`SchemaSource::default()` =
       `FirstParty`; `--schema schemastore` opts out). The corpus gate runs first-party by
       default, giving the north star ongoing regression coverage.
-  - [ ] Follow-up: add first-party (DSL) fetch to the resync pipeline; a first-party vs
-        SchemaStore cross-validation gate over the corpus.
+- [x] **First-party DSL added to the resync pipeline** (`.github/workflows/resync-schema.yml`):
+      one combined weekly job now fetches BOTH `github-workflow.json` and `workflow-v1.0.json`,
+      opens a single PR when either changed (flagging a first-party change as the higher-stakes
+      one, since it drives default validation), and verifies before opening the PR that the new
+      schemas build + transpile + pass the corpus gate.
+  - [ ] Follow-up: a first-party vs SchemaStore cross-validation gate over a broader corpus.
 
 ## Honest note
 Roughly **~10%** of actionlint's user value (structure) is what the thesis addresses.

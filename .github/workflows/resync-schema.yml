@@ -1,9 +1,15 @@
-# The "D" pipeline (ADR-0001, ADR-0003): watch the upstream SchemaStore schema and open a
-# PR when it changes. The PR runs CI (including the golden-corpus regression gate) and a
-# human approves the merge — NEVER auto-merged.
+# The "D" pipeline (ADR-0001, ADR-0003): watch both vendored structural schemas and open a
+# single PR when either changes. The PR runs CI (build, tests, and the golden-corpus
+# regression gate — which validates against the DEFAULT first-party schema) and a human
+# approves the merge — NEVER auto-merged.
 #
-# It also cross-checks GitHub's first-party workflow-v1.0.json as an advisory signal
-# (option C): a disagreement is surfaced in the PR body for review, not auto-applied.
+# Two upstreams are tracked:
+#   - schemas/github-workflow.json  <- SchemaStore (community; the --schema schemastore path)
+#   - schemas/workflow-v1.0.json    <- GitHub's first-party DSL (the DEFAULT validator)
+#
+# A first-party change is higher-stakes because it drives default validation; the PR body
+# calls it out, and CI must show a green corpus gate before merge. An advisory event-name
+# cross-check between the two is also reported.
 name: resync-schema
 on:
   schedule:
@@ -19,43 +25,80 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Fetch upstream SchemaStore schema
         run: |
           curl -sfL https://json.schemastore.org/github-workflow.json \
             -o schemas/github-workflow.json.new
 
-      - name: Advisory cross-check vs GitHub first-party schema
-        # Reports SchemaStore-vs-GitHub event divergences for human review (option C).
-        # Advisory only — never fails the job.
+      - name: Fetch upstream first-party DSL
+        run: |
+          curl -sfL https://raw.githubusercontent.com/actions/languageservices/main/workflow-parser/src/workflow-v1.0.json \
+            -o schemas/workflow-v1.0.json.new
+
+      - name: Advisory cross-check (SchemaStore vs first-party events)
         run: ./scripts/schema-crosscheck.sh | tee /tmp/crosscheck.txt
 
-      - name: Detect change
+      - name: Detect changes
         id: diff
         run: |
+          changed=false
+          notes=""
+
           if cmp -s schemas/github-workflow.json schemas/github-workflow.json.new; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
             rm -f schemas/github-workflow.json.new
           else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
             mv schemas/github-workflow.json.new schemas/github-workflow.json
+            changed=true
+            notes="${notes}- **SchemaStore** (\`schemas/github-workflow.json\`) changed (community; \`--schema schemastore\` path).\n"
           fi
 
-      - name: Open PR (gated by CI + human review — never auto-merge)
+          if cmp -s schemas/workflow-v1.0.json schemas/workflow-v1.0.json.new; then
+            rm -f schemas/workflow-v1.0.json.new
+          else
+            mv schemas/workflow-v1.0.json.new schemas/workflow-v1.0.json
+            changed=true
+            notes="${notes}- **First-party DSL** (\`schemas/workflow-v1.0.json\`) changed. **This drives DEFAULT validation** — review the corpus diff with extra care.\n"
+          fi
+
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          # Multi-line output for the PR body.
+          {
+            echo "notes<<EOF"
+            printf '%b' "$notes"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify the vendored schemas still build + pass the corpus gate
+        if: steps.diff.outputs.changed == 'true'
+        # Catches a bad upstream before a PR is opened: the first-party DSL must still
+        # transpile + compile, both schemas must build, and the corpus gate (default =
+        # first-party) must stay green.
+        run: |
+          cargo test --lib schema:: --verbose
+          cargo build --release
+          ./scripts/run-corpus.sh
+
+      - name: Open combined PR (gated by CI + human review — never auto-merge)
         if: steps.diff.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v6
         with:
-          branch: resync/schemastore
-          title: "resync: update vendored SchemaStore workflow schema"
+          branch: resync/schemas
+          title: "resync: update vendored workflow schema(s)"
           body: |
-            Automated schema resync from SchemaStore.
+            Automated schema resync. What changed:
 
-            **Do not merge without reviewing the golden-corpus diff in CI.** This PR
-            changes the structural schema baked into the binary; the corpus regression
-            gate must be green and the results diff reviewed (ADR-0003).
+            ${{ steps.diff.outputs.notes }}
 
-            The advisory cross-check against GitHub's first-party `workflow-v1.0.json`
-            runs in CI; any disagreement is a signal to investigate, not a blocker.
+            **Do not merge without reviewing the golden-corpus diff in CI.** These files are
+            baked into the binary; the corpus regression gate (which validates against the
+            default first-party schema) must be green and any results diff reviewed
+            (ADR-0003). A change to `workflow-v1.0.json` alters DEFAULT validation for every
+            user — review it as the higher-stakes change.
+
+            The advisory SchemaStore-vs-first-party event cross-check ran in CI; divergences
+            are a signal to investigate, not a blocker.
           labels: |
             schema-resync
             needs-corpus-review
