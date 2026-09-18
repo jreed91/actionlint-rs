@@ -97,7 +97,12 @@ pretending otherwise is how this project would mislead its users.
       opens a single PR when either changed (flagging a first-party change as the higher-stakes
       one, since it drives default validation), and verifies before opening the PR that the new
       schemas build + transpile + pass the corpus gate.
-  - [ ] Follow-up: a first-party vs SchemaStore cross-validation gate over a broader corpus.
+- [x] **Cross-validation gate over a broader corpus** (`tests/xval.rs`, `corpus/xval/`):
+      14 real workflows from popular repos validated under BOTH schemas; a checked-in
+      baseline (`corpus/xval/BASELINE.txt`) records accepted disagreements, and the gate
+      fails on any drift (new or resolved). Seeded baseline: axum-ci/clap-ci diverge on
+      `continue-on-error: ${{ expr }}` (first-party types it strictly boolean). Wired into
+      CI; proven to catch drift.
 
 ## Honest note
 Roughly **~10%** of actionlint's user value (structure) is what the thesis addresses.

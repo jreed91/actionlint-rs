@@ -1,0 +1,21 @@
+# Cross-validation baseline: known/accepted disagreements between the two structural
+# schemas on the real workflows in corpus/xval/.
+#
+# The cross-validation gate (tests/xval.rs) runs every corpus/xval/*.yml through BOTH the
+# first-party (default) and SchemaStore validators and records where they disagree (one
+# accepts, the other rejects). The gate FAILS if the observed set of disagreements differs
+# from this baseline — a new disagreement means the schemas drifted and a human should look.
+#
+# Format: one `filename` per accepted-disagreement line (comments start with #). The reason
+# is documented alongside for the reviewer.
+#
+# --- Accepted disagreements ---
+#
+# axum-ci.yml, clap-ci.yml: use `continue-on-error: ${{ <expr> }}`. GitHub's first-party
+#   DSL types `continue-on-error` as boolean (with an expression *context* annotation that
+#   we drop as non-structural, per the "expressions are opaque" scope), so the transpiled
+#   first-party schema rejects the `${{ }}` string while SchemaStore accepts it. Known
+#   fidelity gap in the option-B path; tracked, not fixed (would require modeling expression
+#   positions).
+axum-ci.yml
+clap-ci.yml

@@ -15,6 +15,10 @@ jobs:
       - run: cargo test --verbose
       - name: Golden corpus regression gate
         run: ./scripts/run-corpus.sh
+      - name: Cross-validation gate (first-party vs SchemaStore drift)
+        # Fails if the two schemas' disagreements on real workflows drift from the checked-in
+        # baseline (corpus/xval/BASELINE.txt). See tests/xval.rs.
+        run: cargo test --test xval
 
   coverage:
     runs-on: ubuntu-latest
