@@ -31,6 +31,8 @@ regression-gated resync pipeline, rather than hand-coded rules. The semantic che
 - **Security & misc** — script injection from untrusted input (`${{ github.event.*.title }}`,
   `github.head_ref`, …), hardcoded credentials, deprecated `::set-output::` / `::save-state::`
   commands, cron syntax, and constant `if:` conditions (`if: false` never runs).
+- **Events** — `on:` event names (a typo like `pull-request` for `pull_request`) and activity
+  `types:` (`opend` for `opened`).
 - **Enums** — `permissions` scopes and levels (derived from GitHub's own schema, so
   per-scope: `id-token` accepts only `write`/`none`) and `shell` keywords.
 - **Runner labels** (opt-in, `--check-runner-labels`) — `runs-on` labels checked against the

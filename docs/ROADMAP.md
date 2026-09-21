@@ -50,8 +50,14 @@ data-driven webhook/reusable-workflow typing, not core linting gaps.
 ## Deferred — the "other 90%" (post-MVP)
 
 ### Schema thesis helps here (structural/data, resync-able)
-- [ ] Webhook **event / activity-type** validation — resync from octokit/openapi-webhooks
-      or github/docs. (Data-driven; fits A+D.)
+- [x] Webhook **event / activity-type** validation (`src/events.rs`): event names checked
+      against the set **derived from the vendored SchemaStore `event` enum** (resyncs with the
+      schema); activity `types:` checked against a curated per-event table (GitHub's activity
+      types are stable facts, not cleanly addressable in either schema, so hand-maintained).
+      Handles string/sequence/mapping `on:` forms; a bad event name suppresses its type check
+      to avoid cascades. On by default; ZERO false positives across the 29-workflow corpus.
+      Rules `event/name`, `event/types`. (openapi-webhooks resync for the types table is a
+      future refinement.)
 - [x] Enum tightening the SchemaStore schema leaves loose (`src/enums.rs`, `src/runner.rs`):
       - **permissions** scopes + per-scope levels — **derived from the embedded first-party
         DSL** (`/definitions/permissions-mapping`), so they resync automatically (ADR-0001);

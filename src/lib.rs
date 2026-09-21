@@ -8,6 +8,7 @@ pub mod config;
 pub mod dataflow;
 pub mod diagnostic;
 pub mod enums;
+pub mod events;
 pub mod expr;
 pub mod expr_lint;
 pub mod filter;
