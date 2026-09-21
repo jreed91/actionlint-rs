@@ -19,16 +19,33 @@ regression-gated resync pipeline, rather than hand-coded rules. The semantic che
   errors, and enforces **context availability by position** (e.g. `secrets` is not available
   in `runs-on`).
 - **Job graph** — `needs:` referencing undefined jobs, and dependency cycles.
+- **Dataflow** — `steps.<id>...` must name a step defined in the same job; `needs.<job>...`
+  must name a job listed in `needs:`.
+- **Reusable workflows** — a job calling a *local* `workflow_call` workflow
+  (`uses: ./....yml`) is checked against the callee's declared inputs/secrets (required
+  supplied, no unknowns; `secrets: inherit` respected). Remote callees need network, skipped.
 - **Action references** — `uses:` must be a valid `owner/repo@ref`, `./local`, or
   `docker://image` (a pinned ref is required for repository actions).
 - **Scripts** — if `shellcheck` / `pyflakes` are installed, `run:` blocks are linted through
   them (disable with `--no-external`).
 - **Security & misc** — script injection from untrusted input (`${{ github.event.*.title }}`,
   `github.head_ref`, …), hardcoded credentials, deprecated `::set-output::` / `::save-state::`
-  commands, and cron syntax.
+  commands, cron syntax, constant `if:` conditions (`if: false` never runs), and glob-pattern
+  syntax in `branches`/`tags`/`paths` filters.
+- **Events** — `on:` event names (a typo like `pull-request` for `pull_request`) and activity
+  `types:` (`opend` for `opened`).
+- **Enums** — `permissions` scopes and levels (derived from GitHub's own schema, so
+  per-scope: `id-token` accepts only `write`/`none`) and `shell` keywords.
+- **Runner labels** (opt-in, `--check-runner-labels`) — `runs-on` labels checked against the
+  known GitHub-hosted set plus self-hosted labels declared in config.
 
-Every check is on by default and validated against a corpus of real-world workflows for
-false positives.
+Every check (except runner labels) is on by default and validated against a corpus of
+real-world workflows for false positives.
+
+**For the full picture** — every rule id, what triggers it, what's on by default vs. opt-in,
+and what the linter deliberately *doesn't* check — see the
+[checks matrix](docs/CHECKS.md). It's the place to look when something wasn't caught and
+you're not sure whether it's a bug or a known gap.
 
 ## Usage
 
@@ -42,12 +59,39 @@ Common flags:
 
 ```sh
 --format sarif            # SARIF 2.1.0 output (for GitHub code scanning)
+--format json             # plain JSON array of diagnostics (for jq / scripting)
 --schema schemastore      # validate against the community SchemaStore schema instead
 --ignore <REGEX>          # suppress diagnostics whose message matches REGEX (repeatable)
 --no-external             # skip shellcheck / pyflakes
+--config <FILE>           # use a specific config file (default: .github/actionlint.yaml)
+--no-config               # ignore any config file
+--check-runner-labels     # also validate runs-on labels (needs config for self-hosted)
 ```
 
 Exit codes: `0` clean, `1` problems found, `2` usage/IO error.
+
+### Configuration
+
+An optional `.github/actionlint.yaml` (actionlint-compatible) is auto-discovered:
+
+```yaml
+self-hosted-runner:
+  labels:            # custom labels accepted by --check-runner-labels
+    - linux-arm64-16core
+ignore:              # message-regex suppressions, committed to the repo
+  - 'unknown runner label'
+```
+
+### As a pre-commit hook
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/jreed91/actionlint-rs
+    rev: v0.1.0
+    hooks:
+      - id: actionlint-rs
+```
 
 ### As a GitHub Action
 

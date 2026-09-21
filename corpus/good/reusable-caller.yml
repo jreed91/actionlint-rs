@@ -1,0 +1,38 @@
+# Known-GOOD: a caller of a local reusable workflow (workflow_call). Supplies the required
+# input + secret, uses `needs` + a matrix of environments, and consumes the callee's output.
+# Exercises the reusable-workflow input/secret typing pass (src/reusable.rs).
+name: Deploy pipeline
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact: ${{ steps.pack.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pack
+        run: echo "name=app.tar.gz" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: build
+    strategy:
+      matrix:
+        environment: [staging, production]
+    uses: ./corpus/good/reusable-callee.yml
+    with:
+      environment: ${{ matrix.environment }}
+      dry-run: false
+    secrets:
+      deploy-token: ${{ secrets.DEPLOY_TOKEN }}
+
+  notify:
+    needs: [build, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "deployed; artifact was ${{ needs.build.outputs.artifact }}"

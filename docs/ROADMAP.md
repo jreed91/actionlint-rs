@@ -11,9 +11,23 @@ pretending otherwise is how this project would mislead its users.
 engine, expression type system, expression checking wired in, context availability, `needs`
 graph, `uses` format, shellcheck/pyflakes, and security/misc (injection, credentials,
 deprecations, cron). Every check is on by default and validated for ZERO false positives
-across a 29-workflow real-world corpus. Remaining items below are refinements and ecosystem
-polish (JSON output, config file, action-metadata resolution, release binaries), not core
-linting gaps.
+across a 29-workflow real-world corpus.
+
+**Post-parity refinements landed** (2026-09-21): plain JSON output (`--format json`);
+`.github/actionlint.yaml` config file; enum tightening (permissions — DSL-derived,
+per-scope levels; shells; runner labels, opt-in); constant-`if` detection; `${{ }}`
+neutralization so shellcheck/pyflakes stop mis-flagging GitHub expressions; a pre-commit
+hook; **dataflow** (undefined `steps.<id>` / non-needed `needs.<job>`); **reusable-workflow
+(`workflow_call`) input/secret typing** for local callees; **webhook event + activity-type**
+validation; **glob-pattern syntax**; and a diagnostic-quality fix (reusable-job shape →
+"missing `uses`"). Every one is corpus-clean (zero false positives) and verified on a real
+repo (digital-order-processing).
+
+**Only environment-blocked items remain:** multi-target release binaries / composite action
+(need cross-compile toolchains + publishing infra), remote `action.yml` `with:`-input
+resolution (needs network), and deprecated-action-version data (needs a resync-able network
+dataset to stay zero-FP). Each is marked below with its blocker; none is a core linting gap
+achievable offline.
 
 ## v1 (MVP) — in scope
 - [x] Parse workflow YAML into a form we can validate. (`src/yaml.rs`)
@@ -44,10 +58,24 @@ linting gaps.
 ## Deferred — the "other 90%" (post-MVP)
 
 ### Schema thesis helps here (structural/data, resync-able)
-- [ ] Webhook **event / activity-type** validation — resync from octokit/openapi-webhooks
-      or github/docs. (Data-driven; fits A+D.)
-- [ ] Enum tightening the SchemaStore schema leaves loose (permissions scopes, shells,
-      runner labels). (Data-driven.)
+- [x] Webhook **event / activity-type** validation (`src/events.rs`): event names checked
+      against the set **derived from the vendored SchemaStore `event` enum** (resyncs with the
+      schema); activity `types:` checked against a curated per-event table (GitHub's activity
+      types are stable facts, not cleanly addressable in either schema, so hand-maintained).
+      Handles string/sequence/mapping `on:` forms; a bad event name suppresses its type check
+      to avoid cascades. On by default; ZERO false positives across the 29-workflow corpus.
+      Rules `event/name`, `event/types`. (openapi-webhooks resync for the types table is a
+      future refinement.)
+- [x] Enum tightening the SchemaStore schema leaves loose (`src/enums.rs`, `src/runner.rs`):
+      - **permissions** scopes + per-scope levels — **derived from the embedded first-party
+        DSL** (`/definitions/permissions-mapping`), so they resync automatically (ADR-0001);
+        strictly more precise than a flat list (e.g. `id-token` ∈ {write, none}). On by
+        default; ZERO false positives across the 29-workflow corpus (a first hardcoded pass
+        wrongly flagged `code-quality`, which drove the DSL-derived design).
+      - **shells** — known keyword set or a custom `<cmd> {0}` template. On by default.
+      - **runner labels** — GitHub-hosted set + config-declared self-hosted labels, matched
+        case-insensitively. **Opt-in** (`--check-runner-labels`): larger-runner/self-hosted
+        labels are unbounded, so a static list can't be zero-FP-by-default without config.
 
 ### Full check parity (ADR-0006) — hand-coded, in progress
 - [x] **Expression `${{ }}` lexer/parser/AST** (`src/expr/`, step 1).
@@ -62,7 +90,13 @@ linting gaps.
       resyncs) + a pointer→position classifier; the checker flags a context used where it
       isn't available (e.g. `secrets` in `runs-on`). On by default; ZERO false positives
       across the 29-workflow xval corpus.
-  - [ ] Follow-up: step-output existence (`steps.<id>.outputs.<name>`), needs-output typing.
+  - [x] Follow-up: **step / needs reference existence** (`src/dataflow.rs`) — a `steps.<id>...`
+        must name a step with that `id:` in the same job (`dataflow/step-output`); a
+        `needs.<job>...` must name a job in this job's `needs:` (`dataflow/needs-output`). We
+        check id/job *existence* (statically knowable), not output-*name* existence (a `run:`
+        step's outputs are dynamic; a `uses:` step's need `action.yml`, offline). On by
+        default; corpus-clean except one **true positive** (docker-bpa-ci.yml's `registry-cache`
+        job references `steps.buildx` which it doesn't define — a real latent bug).
 - [x] **`needs:` graph** (`src/graph.rs`, step 5) — undefined-job references + cycle
       detection (iterative DFS, one finding per cycle). On by default; ZERO false positives
       across the 29-workflow xval corpus.
@@ -71,19 +105,44 @@ linting gaps.
       (containing `$`) are skipped. On by default; ZERO false positives across the 29 real
       workflows (surfaced + handled home-assistant's `$/...` substitution form).
   - [ ] Follow-up (needs network): resolve `action.yml` to type-check `with:` inputs.
+        **Deferred: resolving a remote action's `action.yml` requires network access, which is
+        out of scope for an offline linter pass.** (The *local* reusable-workflow analog IS
+        done — see `workflow_call` typing below.)
 - [x] **shellcheck / pyflakes** integration for `run:` blocks (`src/run_lint.rs`, step 7):
       detects the effective shell (step/job/workflow default, else bash), spawns shellcheck
       (bash/sh/dash/ksh) or pyflakes (python) via stdin, maps findings to the `run:` node.
       Optional — silently skipped if the tool isn't installed. `--no-external` disables them
       (used by the corpus gate, which tests structural/expression correctness, not tool
-      opinions). Rule ids `run/shellcheck`, `run/pyflakes`.
+      opinions). Rule ids `run/shellcheck`, `run/pyflakes`. **`${{ }}` expressions are
+      neutralized** (replaced by a length/line-preserving inert placeholder — a `$`-var for
+      shell, a bare name for python) before linting, so GitHub expressions don't produce
+      spurious shell/python syntax findings (was SC2296/SC2050 spam on real repos).
 - [x] **Security + misc checks** (`src/checks.rs`, step 8): script-injection from untrusted
       free-text input (`github.event.*` titles/bodies/messages/names, `head_ref`; NOT
       constrained fields like `.sha`/`base.ref`), hardcoded credentials in `credentials`
       blocks, deprecated `::set-output::`/`::save-state::` commands, and cron-syntax
       validation. On by default; ZERO false positives across the 29-workflow xval corpus.
-  - [ ] Follow-up: glob syntax, constant `if:` conditions, deprecated action versions.
-- [ ] **Reusable workflow (`workflow_call`)** input/output/secret typing.
+  - [x] Follow-up: **constant `if:` conditions** (`src/checks.rs`, rule `misc/constant-if`) —
+        flags `if: true` / `if: ${{ false }}` (unambiguous constants only; no arbitrary
+        constant-folding, to stay zero-FP). On by default; corpus-clean.
+  - [x] Follow-up: **glob syntax** (`src/globs.rs`, rule `glob/syntax`) — validates
+        `on.<event>.{branches,tags,paths}[-ignore]` patterns for the *unambiguous* structural
+        errors only (unclosed `[` character class, empty pattern), honoring escapes and the
+        literal-first-`]` rule. Deliberately narrow (GitHub's filter dialect has subtle rules;
+        over-flagging would break the zero-FP bar). On by default; corpus-clean.
+  - [ ] Follow-up: deprecated action versions — deferred deliberately. A reliable list is
+        network-sourced and time-sensitive (action authors deprecate on their own cadence); a
+        hardcoded list would be stale and false-positive-prone, violating the zero-FP bar.
+        Best done later as a resync-able dataset, not hand-coded.
+- [x] **Reusable workflow (`workflow_call`)** input/secret typing (`src/reusable.rs`) — for a
+      **local** callee (`uses: ./....yml`, resolved offline relative to the caller), reads the
+      callee's `on.workflow_call` contract and checks the caller job: required inputs supplied,
+      no unknown inputs, required secrets supplied (`secrets: inherit` disables the secret
+      check). Remote callees (`@ref`) need network and are skipped; a missing/non-reusable
+      callee is skipped, not spuriously flagged. Rules `reusable/input`, `reusable/secret`.
+      On by default; corpus-clean and clean on a real repo (digital-order-processing) that
+      calls local reusable workflows — and verified to catch an injected bogus input against
+      that repo's real contracts. (Output typing not yet checked.)
 
 ### Diagnostic quality (post-MVP polish)
 - [x] **`oneOf` error messages humanized** (`src/humanize.rs`). Descends failed `oneOf`
@@ -91,22 +150,34 @@ linting gaps.
       fail shallow by rejecting the instance's own keys), and renders the leaf in plain
       language, re-anchored to the deepest node. E.g. a job missing `runs-on` now reports
       `` `build` is missing required key `runs-on` `` instead of the schema jargon.
-  - [ ] Follow-up: ambiguous job branches (only `with:`, no `runs-on`/`uses`) report
-        "missing runs-on"; could detect `with:`/`secrets:` as a reusable-job signal.
+  - [x] Follow-up: **ambiguous job branches** — a job with `with:`/`secrets:` but no
+        `runs-on`/`uses` is now reported as missing `uses` (a reusable-workflow call), not the
+        misleading "missing runs-on". Detected in `humanize` via the job instance's shape,
+        before the generic `oneOf` branch scoring. Works under both schema sources; corpus- and
+        gate-clean.
 
 ### Distribution / ecosystem parity (post-MVP)
 - [x] **SARIF 2.1.0 output** (`--format sarif`, `src/sarif.rs`) — enables inline PR
       annotations via `github/codeql-action/upload-sarif`. Each finding carries a grouped
       `ruleId` (structure/required, /type, ...), a full region (start+end from the span),
       and a stable partial fingerprint. Verified against GitHub's SARIF-support docs.
-  - [ ] Follow-up: plain JSON output; a problem-matcher path as a lighter alternative.
+  - [x] Follow-up: **plain JSON output** (`--format json`, `src/json_out.rs`) — a flat array
+        of diagnostic objects for `jq`/scripting. (Problem-matcher path still open.)
 - [x] **`--ignore <REGEX>` filtering** (`src/filter.rs`) — actionlint-compatible: suppress
       diagnostics by message regex, repeatable, fails fast on an invalid pattern.
 - [x] **`--no-external`** flag to disable shellcheck/pyflakes.
 - [ ] Composite action + multi-target release binaries (cross-compilation) — faster,
-      cross-OS UX vs the v1 Docker action.
-- [ ] pre-commit hook, Docker image, editor integrations, WASM playground.
-- [ ] plain JSON output; Go-template/custom output; `.github/actionlint.yaml` config file.
+      cross-OS UX vs the v1 Docker action. **Deferred: needs cross-compile toolchains and
+      release/publishing infra to build and verify; shipping an unverified release workflow
+      would violate the project's verify-first bar.**
+- [x] **pre-commit hook** (`.pre-commit-hooks.yaml`, `language: rust`, scoped to
+      `.github/workflows/*.{yml,yaml}`). Docker image, editor integrations, WASM playground
+      still open.
+- [x] **`.github/actionlint.yaml` config file** (`src/config.rs`) — actionlint-compatible
+      subset: `self-hosted-runner.labels` and repo-committed `ignore` regexes (composed with
+      `--ignore`). Unknown keys ignored (forward-compat); malformed config is exit 2.
+      Discovered by default, or `--config <FILE>` / `--no-config`.
+- [x] **plain JSON output** (see above). Go-template/custom output still open.
 
 ## North star (option B) — DONE (first cut)
 - [x] **DSL→JSON-Schema transpiler** (`src/transpile.rs`): full-fidelity transpile of

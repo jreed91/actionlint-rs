@@ -10,9 +10,13 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use jsonschema::Validator;
 
+use crate::config::Config;
 use crate::diagnostic::{Diagnostic, Position};
 use crate::run_lint::{self, RunLinters};
-use crate::{checks, expr_lint, graph, humanize, span, uses, yaml};
+use crate::{
+    checks, dataflow, enums, events, expr_lint, globs, graph, humanize, reusable, runner, span,
+    uses, yaml,
+};
 
 /// Lint one workflow file's source text. Uses auto-detected external `run:` linters
 /// (shellcheck/pyflakes if installed). For explicit control, use [`lint_source_with`].
@@ -28,6 +32,22 @@ pub fn lint_source_with(
     path: &Path,
     source: &str,
     run_linters: &RunLinters,
+) -> Result<Vec<Diagnostic>> {
+    lint_source_full(validator, path, source, run_linters, &Config::default())
+}
+
+/// Lint one workflow file's source text, with explicit external-linter control **and** a
+/// loaded [`Config`] (`.github/actionlint.yaml`). The config supplies self-hosted runner
+/// labels for `runs-on` checking; message-regex `ignore` patterns are applied by the caller
+/// (they compose with `--ignore`), not here.
+///
+/// `path` is used only for diagnostic display; `source` is the file contents.
+pub fn lint_source_full(
+    validator: &Validator,
+    path: &Path,
+    source: &str,
+    run_linters: &RunLinters,
+    config: &Config,
 ) -> Result<Vec<Diagnostic>> {
     let parsed = yaml::parse(source)
         .with_context(|| format!("could not parse {}", path.display()))?;
@@ -72,6 +92,65 @@ pub fn lint_source_with(
         );
     }
 
+    // Runner-label pass (opt-in): `runs-on` labels must be known GitHub-hosted labels or
+    // declared self-hosted labels (from config). Off by default — see the `runner` module.
+    if config.check_runner_labels {
+        for f in runner::check(&parsed.json, &config.self_hosted_runner_labels) {
+            let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
+                .unwrap_or_else(|| Position::new(1, 1));
+            diagnostics.push(
+                Diagnostic::new(path.to_path_buf(), pos, f.pointer, f.message)
+                    .with_rule_id(f.rule_id),
+            );
+        }
+    }
+
+    // Dataflow pass: undefined step-id references and non-needed job references.
+    for f in dataflow::check(&parsed.json) {
+        let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
+            .unwrap_or_else(|| Position::new(1, 1));
+        diagnostics.push(
+            Diagnostic::new(path.to_path_buf(), pos, f.pointer, f.message).with_rule_id(f.rule_id),
+        );
+    }
+
+    // Reusable-workflow pass: check `with:`/`secrets:` of local `workflow_call` jobs against
+    // the callee's declared contract (local `./` callees only; remote needs network).
+    for f in reusable::check(&parsed.json, path) {
+        let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
+            .unwrap_or_else(|| Position::new(1, 1));
+        diagnostics.push(
+            Diagnostic::new(path.to_path_buf(), pos, f.pointer, f.message).with_rule_id(f.rule_id),
+        );
+    }
+
+    // Event pass: `on:` event names and activity types.
+    for f in events::check(&parsed.json) {
+        let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
+            .unwrap_or_else(|| Position::new(1, 1));
+        diagnostics.push(
+            Diagnostic::new(path.to_path_buf(), pos, f.pointer, f.message).with_rule_id(f.rule_id),
+        );
+    }
+
+    // Glob pass: unambiguous syntax errors in `on.<event>.{branches,tags,paths}` filters.
+    for f in globs::check(&parsed.json) {
+        let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
+            .unwrap_or_else(|| Position::new(1, 1));
+        diagnostics.push(
+            Diagnostic::new(path.to_path_buf(), pos, f.pointer, f.message).with_rule_id(f.rule_id),
+        );
+    }
+
+    // Enum pass: permissions scopes/levels and shell keywords (bounded, on by default).
+    for f in enums::check(&parsed.json) {
+        let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
+            .unwrap_or_else(|| Position::new(1, 1));
+        diagnostics.push(
+            Diagnostic::new(path.to_path_buf(), pos, f.pointer, f.message).with_rule_id(f.rule_id),
+        );
+    }
+
     // Security + misc pass: script injection, hardcoded creds, deprecated commands, cron.
     for f in checks::check(&parsed.json) {
         let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
@@ -109,9 +188,19 @@ pub fn lint_file_with(
     path: &Path,
     run_linters: &RunLinters,
 ) -> Result<Vec<Diagnostic>> {
+    lint_file_full(validator, path, run_linters, &Config::default())
+}
+
+/// Lint a file on disk, with explicit external-linter control and a loaded [`Config`].
+pub fn lint_file_full(
+    validator: &Validator,
+    path: &Path,
+    run_linters: &RunLinters,
+    config: &Config,
+) -> Result<Vec<Diagnostic>> {
     let source = std::fs::read_to_string(path)
         .with_context(|| format!("could not read {}", path.display()))?;
-    lint_source_with(validator, path, &source, run_linters)
+    lint_source_full(validator, path, &source, run_linters, config)
 }
 
 /// Lint a file on disk (auto-detected external linters).
@@ -125,7 +214,17 @@ pub fn lint_stdin_with(
     source: &str,
     run_linters: &RunLinters,
 ) -> Result<Vec<Diagnostic>> {
-    lint_source_with(validator, &PathBuf::from("<stdin>"), source, run_linters)
+    lint_stdin_full(validator, source, run_linters, &Config::default())
+}
+
+/// Lint stdin with explicit linter control and a loaded [`Config`].
+pub fn lint_stdin_full(
+    validator: &Validator,
+    source: &str,
+    run_linters: &RunLinters,
+    config: &Config,
+) -> Result<Vec<Diagnostic>> {
+    lint_source_full(validator, &PathBuf::from("<stdin>"), source, run_linters, config)
 }
 
 /// Lint stdin (auto-detected external linters).
@@ -317,6 +416,123 @@ jobs:
 
         let diags = lint_stdin(&validator(), "on: push\njobs:\n  b:\n    steps: [{run: hi}]\n").unwrap();
         assert!(diags[0].file.to_string_lossy().contains("stdin"));
+    }
+
+    #[test]
+    fn lint_source_default_wrapper_works() {
+        // Exercises the auto-detecting `lint_source` wrapper directly.
+        let diags = lint_source(
+            &validator(),
+            Path::new("wf.yml"),
+            "on: push\njobs:\n  b:\n    steps: [{run: hi}]\n",
+        )
+        .unwrap();
+        assert!(diags.iter().any(|d| d.message.contains("runs-on")));
+    }
+
+    /// Helper: lint with a given config and no external linters.
+    fn lint_cfg(src: &str, config: &Config) -> Vec<Diagnostic> {
+        lint_source_full(&validator(), Path::new("wf.yml"), src, &RunLinters::none(), config)
+            .unwrap()
+    }
+
+    #[test]
+    fn dataflow_pass_is_wired() {
+        // Undefined step id reference -> a dataflow/step-output finding through lint.rs.
+        let src = "\
+on: push
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ${{ steps.ghost.outputs.x }}
+";
+        let diags = lint_cfg(src, &Config::default());
+        assert!(diags.iter().any(|d| d.rule_id == "dataflow/step-output"), "{diags:?}");
+    }
+
+    #[test]
+    fn events_pass_is_wired() {
+        // Unknown event name -> event/name finding.
+        let diags = lint_cfg(
+            "on: bogus_event\njobs:\n  b:\n    runs-on: ubuntu-latest\n    steps: [{run: hi}]\n",
+            &Config::default(),
+        );
+        assert!(diags.iter().any(|d| d.rule_id == "event/name"), "{diags:?}");
+    }
+
+    #[test]
+    fn globs_pass_is_wired() {
+        let src = "\
+on:
+  push:
+    branches: [\"v[0-9\"]
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps: [{run: hi}]
+";
+        let diags = lint_cfg(src, &Config::default());
+        assert!(diags.iter().any(|d| d.rule_id == "glob/syntax"), "{diags:?}");
+    }
+
+    #[test]
+    fn enums_pass_is_wired() {
+        let src = "\
+on: push
+permissions:
+  contents: readonly
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps: [{run: hi}]
+";
+        let diags = lint_cfg(src, &Config::default());
+        assert!(diags.iter().any(|d| d.rule_id == "enum/permissions"), "{diags:?}");
+    }
+
+    #[test]
+    fn runner_pass_is_wired_when_enabled() {
+        let src = "\
+on: push
+jobs:
+  b:
+    runs-on: totally-made-up-label
+    steps: [{run: hi}]
+";
+        // Off by default: no runner finding.
+        assert!(!lint_cfg(src, &Config::default()).iter().any(|d| d.rule_id == "runner/label"));
+        // Enabled via config toggle: wired through lint.rs.
+        let cfg = Config { check_runner_labels: true, ..Config::default() };
+        assert!(lint_cfg(src, &cfg).iter().any(|d| d.rule_id == "runner/label"));
+    }
+
+    #[test]
+    fn reusable_pass_is_wired() {
+        // A caller job referencing a local reusable workflow with an unknown input.
+        let dir = std::env::temp_dir().join(format!("alr-reuse-wire-{}", std::process::id()));
+        let wf = dir.join(".github").join("workflows");
+        std::fs::create_dir_all(&wf).unwrap();
+        std::fs::write(
+            wf.join("reuse.yml"),
+            "on:\n  workflow_call:\n    inputs:\n      env:\n        required: false\n",
+        )
+        .unwrap();
+        let caller = wf.join("caller.yml");
+        std::fs::write(
+            &caller,
+            "on: push\njobs:\n  call:\n    uses: ./.github/workflows/reuse.yml\n    with:\n      bogus: 1\n",
+        )
+        .unwrap();
+        let diags = lint_file_full(
+            &validator(),
+            &caller,
+            &RunLinters::none(),
+            &Config::default(),
+        )
+        .unwrap();
+        assert!(diags.iter().any(|d| d.rule_id == "reusable/input"), "{diags:?}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
 

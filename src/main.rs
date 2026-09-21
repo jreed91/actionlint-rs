@@ -14,7 +14,9 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::Parser;
 
-use actionlint_rs::{diagnostic::Diagnostic, filter::IgnoreFilter, lint, sarif, schema};
+use actionlint_rs::{
+    config::Config, diagnostic::Diagnostic, filter::IgnoreFilter, json_out, lint, sarif, schema,
+};
 use clap::ValueEnum;
 
 #[derive(Parser, Debug)]
@@ -45,6 +47,21 @@ struct Cli {
     /// tools are found on PATH.
     #[arg(long = "no-external", default_value_t = false)]
     no_external: bool,
+
+    /// Path to the config file. Defaults to `.github/actionlint.yaml` (or `.yml`) under the
+    /// current directory if present.
+    #[arg(long = "config", value_name = "FILE")]
+    config: Option<PathBuf>,
+
+    /// Ignore any `.github/actionlint.yaml` config file.
+    #[arg(long = "no-config", default_value_t = false)]
+    no_config: bool,
+
+    /// Check `runs-on` labels against the known GitHub-hosted set (plus any declared
+    /// `self-hosted-runner.labels`). Off by default: larger-runner and self-hosted labels are
+    /// project-specific and unbounded, so this needs config to avoid false positives.
+    #[arg(long = "check-runner-labels", default_value_t = false)]
+    check_runner_labels: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -70,6 +87,8 @@ enum Format {
     Human,
     /// SARIF 2.1.0 JSON, for GitHub code-scanning inline annotations.
     Sarif,
+    /// Plain JSON array of diagnostics, for scripting / `jq`.
+    Json,
 }
 
 fn main() -> ExitCode {
@@ -96,9 +115,28 @@ fn run() -> Result<bool> {
     // makes the default action invocation fall through to workflow discovery.
     let args = std::env::args_os().filter(|a| !a.is_empty());
     let cli = Cli::parse_from(args);
+
+    // Load config (unless disabled). An explicit --config path must exist; a discovered one
+    // is optional. A malformed config is a hard error (exit 2).
+    let mut config = if cli.no_config {
+        Config::default()
+    } else if let Some(path) = &cli.config {
+        Config::from_path(path)?
+    } else {
+        Config::discover(Path::new("."))?
+    };
+    // The runner-label check is a CLI run-mode toggle, not persisted config.
+    config.check_runner_labels = cli.check_runner_labels;
+
     // Compile ignore patterns up front so an invalid regex fails fast (exit 2), before any
-    // linting work.
-    let ignore = IgnoreFilter::new(&cli.ignore)?;
+    // linting work. Config `ignore` patterns compose with any `--ignore` flags.
+    let ignore_patterns: Vec<String> = config
+        .ignore
+        .iter()
+        .cloned()
+        .chain(cli.ignore.iter().cloned())
+        .collect();
+    let ignore = IgnoreFilter::new(&ignore_patterns)?;
     let validator = schema::build_validator_for(cli.schema.into())?;
     // External `run:` linters: auto-detect unless disabled.
     let run_linters = if cli.no_external {
@@ -114,7 +152,7 @@ fn run() -> Result<bool> {
         std::io::stdin()
             .read_to_string(&mut source)
             .context("reading stdin")?;
-        all.extend(lint::lint_stdin_with(&validator, &source, &run_linters)?);
+        all.extend(lint::lint_stdin_full(&validator, &source, &run_linters, &config)?);
     } else {
         let targets = if cli.files.is_empty() {
             discover_workflows(Path::new("."))?
@@ -124,16 +162,18 @@ fn run() -> Result<bool> {
 
         if targets.is_empty() {
             eprintln!("actionlint-rs: no workflow files found under .github/workflows/");
-            // In SARIF mode still emit a valid (empty) document so an upload step has
-            // something well-formed to consume.
-            if cli.format == Format::Sarif {
-                println!("{}", sarif::to_sarif(&[]));
+            // In a machine format still emit a valid (empty) document so a consuming step
+            // has something well-formed to parse.
+            match cli.format {
+                Format::Sarif => println!("{}", sarif::to_sarif(&[])),
+                Format::Json => println!("{}", json_out::to_json(&[])),
+                Format::Human => {}
             }
             return Ok(false);
         }
 
         for file in &targets {
-            all.extend(lint::lint_file_with(&validator, file, &run_linters)?);
+            all.extend(lint::lint_file_full(&validator, file, &run_linters, &config)?);
         }
     }
 
@@ -148,6 +188,9 @@ fn run() -> Result<bool> {
         }
         Format::Sarif => {
             println!("{}", sarif::to_sarif(&all));
+        }
+        Format::Json => {
+            println!("{}", json_out::to_json(&all));
         }
     }
     Ok(!all.is_empty())

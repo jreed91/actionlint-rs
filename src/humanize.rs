@@ -24,12 +24,50 @@ pub struct Humanized {
 pub fn humanize(error: &ValidationError<'_>) -> Humanized {
     let pointer = error.instance_path().to_string();
     match error.kind() {
-        ValidationErrorKind::OneOfNotValid { context } => humanize_one_of(&pointer, context),
+        ValidationErrorKind::OneOfNotValid { context } => {
+            // A job that carries a reusable-workflow signal (`with:`/`secrets:`) but no
+            // `runs-on`/`uses` is an intended reusable job missing its `uses:`. The generic
+            // branch scoring would pick the `normalJob` branch and blame missing `runs-on`,
+            // which is misleading. Detect that shape and report the real fix.
+            if let Some(h) = reusable_job_missing_uses(&pointer, error.instance()) {
+                return h;
+            }
+            humanize_one_of(&pointer, context)
+        }
         other => Humanized {
             pointer,
             message: render_leaf(other, &error.instance_path().to_string()),
             rule_id: rule_id_for(other),
         },
+    }
+}
+
+/// If `pointer` names a job (`/jobs/<id>`) whose `instance` looks like a reusable-workflow
+/// call missing its `uses:` — it has `with:` and/or `secrets:` but neither `runs-on` nor
+/// `uses` — produce the "missing `uses`" diagnostic. Otherwise `None`.
+fn reusable_job_missing_uses(pointer: &str, instance: &serde_json::Value) -> Option<Humanized> {
+    // Must be exactly `/jobs/<id>` (a single id segment, not a nested path).
+    let id = pointer.strip_prefix("/jobs/")?;
+    if id.is_empty() || id.contains('/') {
+        return None;
+    }
+    let obj = instance.as_object()?;
+    let has_signal = obj.contains_key("with") || obj.contains_key("secrets");
+    let has_runs_on = obj.contains_key("runs-on");
+    let has_uses = obj.contains_key("uses");
+    if has_signal && !has_runs_on && !has_uses {
+        // `id` is the job's key; unescape pointer tokens for display.
+        let name = id.replace("~1", "/").replace("~0", "~");
+        Some(Humanized {
+            pointer: pointer.to_string(),
+            message: format!(
+                "`{name}` is missing required key `uses` (a job with `with:`/`secrets:` is a \
+                 reusable-workflow call and needs `uses:`)"
+            ),
+            rule_id: "structure/required".to_string(),
+        })
+    } else {
+        None
     }
 }
 
@@ -256,6 +294,37 @@ mod tests {
 
     #[test]
     fn missing_runs_on_names_the_key() {
+        let h = first_message("on: push\njobs:\n  b:\n    steps: [{run: hi}]\n");
+        assert_eq!(h.message, "`b` is missing required key `runs-on`");
+    }
+
+    #[test]
+    fn reusable_job_with_only_with_reports_missing_uses() {
+        // A job with `with:` but no `runs-on`/`uses` is an intended reusable-workflow call;
+        // report the real fix (missing `uses`), not the misleading "missing runs-on".
+        for source in [schema::SchemaSource::SchemaStore, schema::SchemaSource::FirstParty] {
+            let h = first_message_with(
+                "on: push\njobs:\n  b:\n    with:\n      foo: bar\n",
+                source,
+            );
+            assert!(
+                h.message.contains("missing required key `uses`"),
+                "source {source:?}: got: {}",
+                h.message
+            );
+            assert!(h.message.contains("reusable-workflow"), "got: {}", h.message);
+        }
+    }
+
+    #[test]
+    fn reusable_job_with_secrets_reports_missing_uses() {
+        let h = first_message("on: push\njobs:\n  b:\n    secrets:\n      TOKEN: x\n");
+        assert!(h.message.contains("missing required key `uses`"), "got: {}", h.message);
+    }
+
+    #[test]
+    fn normal_job_without_signal_still_reports_runs_on() {
+        // No reusable signal -> the existing "missing runs-on" behavior is unchanged.
         let h = first_message("on: push\njobs:\n  b:\n    steps: [{run: hi}]\n");
         assert_eq!(h.message, "`b` is missing required key `runs-on`");
     }

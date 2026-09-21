@@ -36,6 +36,19 @@ pub fn parse(source: &str) -> Result<ParsedWorkflow<'_>> {
     Ok(ParsedWorkflow { marked, json })
 }
 
+/// Parse an arbitrary (non-workflow) YAML document to a plain `serde_json::Value`,
+/// **without** the workflow-specific reconciliations `parse` applies. Used for auxiliary
+/// files such as the `.github/actionlint.yaml` config, where the workflow reconciliations
+/// (e.g. null `env:` handling) are irrelevant and would be misleading.
+pub fn parse_value(source: &str) -> Result<serde_json::Value> {
+    let mut docs = MarkedYaml::load_from_str(source)
+        .map_err(|e| anyhow!("YAML parse error: {e}"))?;
+    if docs.is_empty() {
+        return Err(anyhow!("empty YAML document"));
+    }
+    Ok(to_json(&docs.swap_remove(0)))
+}
+
 /// Convert a `MarkedYaml` node into a `serde_json::Value`, discarding spans.
 ///
 /// Mapping keys are coerced to strings (JSON object keys are always strings; workflow

@@ -4,15 +4,23 @@
 //! precise `file:line:col` diagnostics. See CONTEXT.md and docs/ for the design.
 
 pub mod checks;
+pub mod config;
+pub mod dataflow;
 pub mod diagnostic;
+pub mod enums;
+pub mod events;
+pub mod globs;
 pub mod expr;
 pub mod expr_lint;
 pub mod filter;
 pub mod graph;
 pub mod humanize;
+pub mod json_out;
 pub mod lint;
 pub mod reconcile;
+pub mod reusable;
 pub mod run_lint;
+pub mod runner;
 pub mod sarif;
 pub mod schema;
 pub mod transpile;

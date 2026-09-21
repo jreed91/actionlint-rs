@@ -42,6 +42,7 @@ fn walk(value: &Value, pointer: &mut String, out: &mut Vec<CheckFinding>) {
                         }
                     }
                     "credentials" => check_credentials(v, pointer, out),
+                    "if" => check_constant_if(v, pointer, out),
                     _ => {}
                 }
 
@@ -91,6 +92,60 @@ fn check_run_script(script: &str, pointer: &str, out: &mut Vec<CheckFinding>) {
             });
         }
     }
+}
+
+/// Flag an `if:` condition that is a constant — it always or never runs, which is almost
+/// always a mistake (a leftover debug toggle, or a misunderstanding of `if:` syntax).
+///
+/// Deliberately narrow to keep zero false positives: we only flag the unambiguous constant
+/// forms — a YAML boolean (`if: true`), and an expression whose entire body is the literal
+/// `true`/`false` (`if: ${{ true }}`) or a bare `true`/`false` string. We do NOT try to
+/// constant-fold arbitrary expressions (`${{ 1 == 1 }}`), which would risk misjudging a
+/// legitimately dynamic condition.
+fn check_constant_if(value: &Value, pointer: &str, out: &mut Vec<CheckFinding>) {
+    let verdict = match value {
+        // A real YAML boolean.
+        Value::Bool(b) => Some(*b),
+        Value::String(s) => constant_bool(s),
+        _ => None,
+    };
+    if let Some(always) = verdict {
+        let effect = if always {
+            "always true — the `if:` has no effect"
+        } else {
+            "always false — this step/job never runs"
+        };
+        out.push(CheckFinding {
+            pointer: pointer.to_string(),
+            message: format!("constant `if:` condition ({effect})"),
+            rule_id: "misc/constant-if".to_string(),
+        });
+    }
+}
+
+/// If `s` is a constant boolean condition, return its value; else `None`. Handles a bare
+/// `true`/`false` and a single wrapping expression `${{ true }}` / `${{ false }}`.
+fn constant_bool(s: &str) -> Option<bool> {
+    let t = s.trim();
+    match t {
+        "true" => return Some(true),
+        "false" => return Some(false),
+        _ => {}
+    }
+    // A single wrapping `${{ ... }}` whose body is exactly the literal true/false.
+    let exprs = expressions_in(t);
+    if exprs.len() == 1 {
+        // The whole string must be just the expression (no surrounding text).
+        let whole = format!("${{{{{}}}}}", exprs[0]);
+        if whole == t {
+            match exprs[0].trim() {
+                "true" => return Some(true),
+                "false" => return Some(false),
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 /// A container/service `credentials` mapping with a literal (non-expression) password.
@@ -379,6 +434,53 @@ mod tests {
         assert!(cron_error("a b c d e").is_some()); // non-numeric
         assert!(cron_error("*/0 * * * *").is_some()); // zero step
         assert!(cron_error("5-2 * * * *").is_some()); // reversed range
+    }
+
+    #[test]
+    fn constant_bool_helper() {
+        assert_eq!(constant_bool("true"), Some(true));
+        assert_eq!(constant_bool("false"), Some(false));
+        assert_eq!(constant_bool("  true  "), Some(true));
+        assert_eq!(constant_bool("${{ true }}"), Some(true));
+        assert_eq!(constant_bool("${{ false }}"), Some(false));
+        assert_eq!(constant_bool("${{true}}"), Some(true));
+        // Dynamic / non-constant conditions are NOT flagged.
+        assert_eq!(constant_bool("${{ github.event_name == 'push' }}"), None);
+        assert_eq!(constant_bool("success()"), None);
+        assert_eq!(constant_bool("${{ true }} && ${{ false }}"), None);
+        assert_eq!(constant_bool("startsWith(true, 'x')"), None);
+    }
+
+    #[test]
+    fn constant_yaml_bool_if_is_flagged() {
+        // `if: true` parses to a YAML boolean.
+        let wf = json!({
+            "jobs": { "b": { "runs-on": "x", "if": true, "steps": [ { "run": "hi" } ] } }
+        });
+        let f = findings(wf);
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert_eq!(f[0].rule_id, "misc/constant-if");
+        assert!(f[0].message.contains("always true"));
+    }
+
+    #[test]
+    fn constant_false_expression_if_is_flagged() {
+        let wf = json!({
+            "jobs": { "b": { "runs-on": "x", "steps": [ { "if": "${{ false }}", "run": "hi" } ] } }
+        });
+        let f = findings(wf);
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert!(f[0].message.contains("never runs"));
+    }
+
+    #[test]
+    fn dynamic_if_is_clean() {
+        let wf = json!({
+            "jobs": { "b": { "runs-on": "x",
+                "if": "${{ github.ref == 'refs/heads/main' }}",
+                "steps": [ { "if": "success()", "run": "hi" } ] } }
+        });
+        assert!(findings(wf).is_empty());
     }
 
     #[test]

@@ -1,0 +1,5 @@
+---
+source: tests/corpus_snapshot.rs
+expression: render(&path)
+---
+7:8 [structure/one-of] `steps` is invalid

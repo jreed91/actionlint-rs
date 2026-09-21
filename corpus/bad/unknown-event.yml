@@ -1,0 +1,8 @@
+# A typo'd webhook event name (`pull-request` for `pull_request`). Structurally the rest is
+# fine; the event check must flag the unknown event name. Must produce >=1 diagnostic.
+on: pull-request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
