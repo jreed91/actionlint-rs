@@ -53,11 +53,9 @@ pretending otherwise is how this project would mislead its users.
       isn't available (e.g. `secrets` in `runs-on`). On by default; ZERO false positives
       across the 29-workflow xval corpus.
   - [ ] Follow-up: step-output existence (`steps.<id>.outputs.<name>`), needs-output typing.
-- [ ] **Context availability + dataflow** — which contexts/props are valid under which
-      keys; step-output existence; `secrets`/`needs` availability. (Scraped from
-      github/docs `contexts.md` — resync-able for the *table*, but the *analysis* is
-      hand-coded.)
-- [ ] **`needs:` graph** — cycle detection, undefined-job references.
+- [x] **`needs:` graph** (`src/graph.rs`, step 5) — undefined-job references + cycle
+      detection (iterative DFS, one finding per cycle). On by default; ZERO false positives
+      across the 29-workflow xval corpus.
 - [ ] **`uses:` / action-metadata validation** — resolve `action.yml`, type-check `with:`
       inputs; popular-action metadata (actionlint's generated `popular_actions.json`).
 - [ ] **Reusable workflow (`workflow_call`)** input/output/secret typing.

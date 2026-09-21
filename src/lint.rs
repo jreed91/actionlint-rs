@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use jsonschema::Validator;
 
 use crate::diagnostic::{Diagnostic, Position};
-use crate::{expr_lint, humanize, span, yaml};
+use crate::{expr_lint, graph, humanize, span, yaml};
 
 /// Lint one workflow file's source text against the compiled schema.
 ///
@@ -39,6 +39,16 @@ pub fn lint_source(validator: &Validator, path: &Path, source: &str) -> Result<V
 
     // Expression pass: type-check every `${{ }}` embedded in a string value.
     diagnostics.extend(expr_lint::lint_expressions(&parsed.json, &parsed.marked, path));
+
+    // Graph pass: `needs:` referencing undefined jobs, and cycles.
+    for f in graph::check(&parsed.json) {
+        let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
+            .unwrap_or_else(|| Position::new(1, 1));
+        diagnostics.push(
+            Diagnostic::new(path.to_path_buf(), pos, f.pointer, f.message)
+                .with_rule_id("graph/needs"),
+        );
+    }
 
     // Stable, source-order output: sort by position, then by pointer, then message for
     // determinism (a scalar can carry both structural and expression diagnostics).
