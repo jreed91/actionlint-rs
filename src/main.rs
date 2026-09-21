@@ -22,6 +22,7 @@ use clap::ValueEnum;
 #[derive(Parser, Debug)]
 #[command(
     name = "actionlint-rs",
+    version,
     about = "Schema-driven GitHub Actions workflow linter (structural checks, v1)"
 )]
 struct Cli {
