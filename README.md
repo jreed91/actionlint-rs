@@ -42,6 +42,11 @@ regression-gated resync pipeline, rather than hand-coded rules. The semantic che
 Every check (except runner labels) is on by default and validated against a corpus of
 real-world workflows for false positives.
 
+**For the full picture** — every rule id, what triggers it, what's on by default vs. opt-in,
+and what the linter deliberately *doesn't* check — see the
+[checks matrix](docs/CHECKS.md). It's the place to look when something wasn't caught and
+you're not sure whether it's a bug or a known gap.
+
 ## Usage
 
 ```sh
