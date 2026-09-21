@@ -1,6 +1,6 @@
 [package]
 name = "actionlint-rs"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 description = "A schema-driven GitHub Actions workflow linter (Rust). Structural validation against the SchemaStore schema, with precise source positions."
 license = "MIT"
