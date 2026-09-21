@@ -11,6 +11,7 @@ pub mod graph;
 pub mod humanize;
 pub mod lint;
 pub mod reconcile;
+pub mod run_lint;
 pub mod sarif;
 pub mod schema;
 pub mod transpile;

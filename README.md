@@ -23,6 +23,10 @@ availability by position (e.g. `secrets` is not available in `runs-on`) — anch
 containing value (see `src/expr/`, `src/expr_lint.rs`). The availability table is derived
 from GitHub's first-party DSL, so it resyncs with the schema.
 
+If `shellcheck` / `pyflakes` are installed, `run:` script blocks are linted through them
+(`--no-external` disables this). It also checks the `needs:` job graph (undefined jobs,
+cycles) and `uses:` reference format.
+
 Still **does not** (yet) check:
 - context/property availability or dataflow (`steps.x.outputs`, `needs`, `secrets`);
 - shell (`shellcheck`) or Python (`pyflakes`) inside `run:`;

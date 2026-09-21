@@ -40,6 +40,11 @@ struct Cli {
     /// diagnostic is suppressed if it matches any pattern.
     #[arg(long = "ignore", value_name = "REGEX")]
     ignore: Vec<String>,
+
+    /// Disable external `run:` linters (shellcheck / pyflakes). By default they run if the
+    /// tools are found on PATH.
+    #[arg(long = "no-external", default_value_t = false)]
+    no_external: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -95,6 +100,12 @@ fn run() -> Result<bool> {
     // linting work.
     let ignore = IgnoreFilter::new(&cli.ignore)?;
     let validator = schema::build_validator_for(cli.schema.into())?;
+    // External `run:` linters: auto-detect unless disabled.
+    let run_linters = if cli.no_external {
+        actionlint_rs::run_lint::RunLinters::none()
+    } else {
+        actionlint_rs::run_lint::RunLinters::default()
+    };
 
     let mut all: Vec<Diagnostic> = Vec::new();
 
@@ -103,7 +114,7 @@ fn run() -> Result<bool> {
         std::io::stdin()
             .read_to_string(&mut source)
             .context("reading stdin")?;
-        all.extend(lint::lint_stdin(&validator, &source)?);
+        all.extend(lint::lint_stdin_with(&validator, &source, &run_linters)?);
     } else {
         let targets = if cli.files.is_empty() {
             discover_workflows(Path::new("."))?
@@ -122,7 +133,7 @@ fn run() -> Result<bool> {
         }
 
         for file in &targets {
-            all.extend(lint::lint_file(&validator, file)?);
+            all.extend(lint::lint_file_with(&validator, file, &run_linters)?);
         }
     }
 

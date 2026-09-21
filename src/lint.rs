@@ -11,12 +11,24 @@ use anyhow::{Context, Result};
 use jsonschema::Validator;
 
 use crate::diagnostic::{Diagnostic, Position};
+use crate::run_lint::{self, RunLinters};
 use crate::{expr_lint, graph, humanize, span, uses, yaml};
 
-/// Lint one workflow file's source text against the compiled schema.
+/// Lint one workflow file's source text. Uses auto-detected external `run:` linters
+/// (shellcheck/pyflakes if installed). For explicit control, use [`lint_source_with`].
+pub fn lint_source(validator: &Validator, path: &Path, source: &str) -> Result<Vec<Diagnostic>> {
+    lint_source_with(validator, path, source, &RunLinters::default())
+}
+
+/// Lint one workflow file's source text, with explicit control over external `run:` linters.
 ///
 /// `path` is used only for diagnostic display; `source` is the file contents.
-pub fn lint_source(validator: &Validator, path: &Path, source: &str) -> Result<Vec<Diagnostic>> {
+pub fn lint_source_with(
+    validator: &Validator,
+    path: &Path,
+    source: &str,
+    run_linters: &RunLinters,
+) -> Result<Vec<Diagnostic>> {
     let parsed = yaml::parse(source)
         .with_context(|| format!("could not parse {}", path.display()))?;
 
@@ -60,6 +72,15 @@ pub fn lint_source(validator: &Validator, path: &Path, source: &str) -> Result<V
         );
     }
 
+    // `run:` pass: lint shell/python scripts via external tools (skipped if not installed).
+    for f in run_lint::check(&parsed.json, run_linters) {
+        let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
+            .unwrap_or_else(|| Position::new(1, 1));
+        diagnostics.push(
+            Diagnostic::new(path.to_path_buf(), pos, f.pointer, f.message).with_rule_id(f.rule_id),
+        );
+    }
+
     // Stable, source-order output: sort by position, then by pointer, then message for
     // determinism (a scalar can carry both structural and expression diagnostics).
     diagnostics.sort_by(|a, b| {
@@ -73,16 +94,34 @@ pub fn lint_source(validator: &Validator, path: &Path, source: &str) -> Result<V
     Ok(diagnostics)
 }
 
-/// Lint a file on disk.
-pub fn lint_file(validator: &Validator, path: &Path) -> Result<Vec<Diagnostic>> {
+/// Lint a file on disk, with explicit external-linter control.
+pub fn lint_file_with(
+    validator: &Validator,
+    path: &Path,
+    run_linters: &RunLinters,
+) -> Result<Vec<Diagnostic>> {
     let source = std::fs::read_to_string(path)
         .with_context(|| format!("could not read {}", path.display()))?;
-    lint_source(validator, path, &source)
+    lint_source_with(validator, path, &source, run_linters)
 }
 
-/// Lint stdin, labeling diagnostics as coming from `<stdin>`.
+/// Lint a file on disk (auto-detected external linters).
+pub fn lint_file(validator: &Validator, path: &Path) -> Result<Vec<Diagnostic>> {
+    lint_file_with(validator, path, &RunLinters::default())
+}
+
+/// Lint stdin, labeling diagnostics as coming from `<stdin>`, with explicit linter control.
+pub fn lint_stdin_with(
+    validator: &Validator,
+    source: &str,
+    run_linters: &RunLinters,
+) -> Result<Vec<Diagnostic>> {
+    lint_source_with(validator, &PathBuf::from("<stdin>"), source, run_linters)
+}
+
+/// Lint stdin (auto-detected external linters).
 pub fn lint_stdin(validator: &Validator, source: &str) -> Result<Vec<Diagnostic>> {
-    lint_source(validator, &PathBuf::from("<stdin>"), source)
+    lint_stdin_with(validator, source, &RunLinters::default())
 }
 
 #[cfg(test)]
@@ -104,7 +143,7 @@ jobs:
     steps:
       - run: echo hi
 ";
-        let diags = lint_source(&validator(), Path::new("wf.yml"), src).unwrap();
+        let diags = lint_source_with(&validator(), Path::new("wf.yml"), src, &RunLinters::none()).unwrap();
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
     }
 
@@ -118,7 +157,7 @@ jobs:
     steps:
       - run: echo hi
 ";
-        let diags = lint_source(&validator(), Path::new("wf.yml"), src).unwrap();
+        let diags = lint_source_with(&validator(), Path::new("wf.yml"), src, &RunLinters::none()).unwrap();
         assert!(!diags.is_empty(), "expected a diagnostic for missing runs-on");
     }
 
@@ -148,7 +187,7 @@ jobs:
 
     #[test]
     fn lint_source_errors_on_unparseable_yaml() {
-        let err = lint_source(&validator(), Path::new("wf.yml"), "on: [push").unwrap_err();
+        let err = lint_source_with(&validator(), Path::new("wf.yml"), "on: [push", &RunLinters::none()).unwrap_err();
         assert!(err.to_string().contains("could not parse"));
     }
 
@@ -156,7 +195,7 @@ jobs:
     fn diagnostics_are_sorted_by_position() {
         // Two distinct structural problems; output must be position-ordered.
         let src = "on: 42\njobs: []\n";
-        let diags = lint_source(&validator(), Path::new("wf.yml"), src).unwrap();
+        let diags = lint_source_with(&validator(), Path::new("wf.yml"), src, &RunLinters::none()).unwrap();
         assert!(diags.len() >= 2, "expected multiple diagnostics: {diags:?}");
         for pair in diags.windows(2) {
             let a = (pair[0].pos.line, pair[0].pos.col);
@@ -176,7 +215,7 @@ jobs:
     steps:
       - run: echo hi
 ";
-        let diags = lint_source(&validator(), Path::new("wf.yml"), src).unwrap();
+        let diags = lint_source_with(&validator(), Path::new("wf.yml"), src, &RunLinters::none()).unwrap();
         assert!(
             diags.iter().any(|d| d.message.contains("unknown context `this`")),
             "expected an expression diagnostic, got: {diags:?}"
@@ -194,7 +233,7 @@ jobs:
     steps:
       - run: echo ${{ runner.os }}
 ";
-        let diags = lint_source(&validator(), Path::new("wf.yml"), src).unwrap();
+        let diags = lint_source_with(&validator(), Path::new("wf.yml"), src, &RunLinters::none()).unwrap();
         assert!(diags.is_empty(), "got: {diags:?}");
     }
 
@@ -209,9 +248,66 @@ jobs:
     steps:
       - run: echo hi
 ";
-        let diags = lint_source(&validator(), Path::new("wf.yml"), src).unwrap();
+        let diags = lint_source_with(&validator(), Path::new("wf.yml"), src, &RunLinters::none()).unwrap();
         assert!(diags.iter().any(|d| d.message.contains("runs-on")));
         assert!(diags.iter().any(|d| d.message.contains("unknown context `bogus`")));
+    }
+
+    #[test]
+    fn graph_and_uses_diagnostics_are_emitted() {
+        // undefined `needs` + unpinned `uses` come through lint_source_with.
+        let src = "\
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    needs: ghost
+    steps:
+      - uses: actions/checkout
+";
+        let diags = lint_source_with(&validator(), Path::new("wf.yml"), src, &RunLinters::none()).unwrap();
+        assert!(diags.iter().any(|d| d.rule_id == "graph/needs"), "{diags:?}");
+        assert!(diags.iter().any(|d| d.rule_id == "uses/format"), "{diags:?}");
+    }
+
+    #[test]
+    fn run_pass_emits_findings_via_fake_linter() {
+        // Force a shellcheck-shaped run via a fake binary (`/bin/cat` echoes non-JSON, so no
+        // findings) AND a pyflakes fake that echoes a finding line — exercises the run pass
+        // wiring in lint_source_with regardless of installed tools.
+        let linters = RunLinters {
+            shellcheck: None,
+            pyflakes: Some("/bin/cat".to_string()),
+        };
+        let src = "\
+on: push
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps:
+      - shell: python
+        run: \"<stdin>:2:1 undefined name 'x'\"
+";
+        let diags = lint_source_with(&validator(), Path::new("wf.yml"), src, &linters).unwrap();
+        assert!(
+            diags.iter().any(|d| d.rule_id == "run/pyflakes"),
+            "expected a run/pyflakes finding, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn lint_file_and_stdin_default_wrappers_work() {
+        // Exercise the auto-detecting default wrappers (lint_file / lint_stdin).
+        let dir = std::env::temp_dir().join(format!("alr-lint-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("wf.yml");
+        std::fs::write(&f, "on: push\njobs:\n  b:\n    steps: [{run: hi}]\n").unwrap();
+        let diags = lint_file(&validator(), &f).unwrap();
+        assert!(diags.iter().any(|d| d.message.contains("runs-on")));
+        std::fs::remove_dir_all(&dir).ok();
+
+        let diags = lint_stdin(&validator(), "on: push\njobs:\n  b:\n    steps: [{run: hi}]\n").unwrap();
+        assert!(diags[0].file.to_string_lossy().contains("stdin"));
     }
 }
 

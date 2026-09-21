@@ -17,7 +17,7 @@ fail=0
 
 for f in corpus/good/*.yml corpus/good/*.yaml; do
   [[ -e "$f" ]] || continue
-  if "$BIN" "$f" >/tmp/out 2>&1; then
+  if "$BIN" --no-external "$f" >/tmp/out 2>&1; then
     echo "GOOD ok:   $f"
   else
     echo "GOOD FAIL: $f (expected zero diagnostics, got):"
@@ -28,7 +28,7 @@ done
 
 for f in corpus/bad/*.yml corpus/bad/*.yaml; do
   [[ -e "$f" ]] || continue
-  if "$BIN" "$f" >/tmp/out 2>&1; then
+  if "$BIN" --no-external "$f" >/tmp/out 2>&1; then
     echo "BAD  FAIL: $f (expected >=1 diagnostic, got none)"
     fail=1
   else

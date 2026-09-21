@@ -62,8 +62,12 @@ pretending otherwise is how this project would mislead its users.
       workflows (surfaced + handled home-assistant's `$/...` substitution form).
   - [ ] Follow-up (needs network): resolve `action.yml` to type-check `with:` inputs.
 - [ ] **Reusable workflow (`workflow_call`)** input/output/secret typing.
-- [ ] **shellcheck** integration for `run:` bash/sh. (Spawn external binary.)
-- [ ] **pyflakes** integration for `run:` python. (Spawn external binary.)
+- [x] **shellcheck / pyflakes** integration for `run:` blocks (`src/run_lint.rs`, step 7):
+      detects the effective shell (step/job/workflow default, else bash), spawns shellcheck
+      (bash/sh/dash/ksh) or pyflakes (python) via stdin, maps findings to the `run:` node.
+      Optional — silently skipped if the tool isn't installed. `--no-external` disables them
+      (used by the corpus gate, which tests structural/expression correctness, not tool
+      opinions). Rule ids `run/shellcheck`, `run/pyflakes`.
 - [ ] **Security checks** — script-injection from untrusted input; hardcoded credentials.
 - [ ] **Misc semantic** — glob syntax, cron syntax, deprecated actions/commands,
       constant `if:` conditions.
