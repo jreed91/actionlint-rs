@@ -5,6 +5,16 @@ and a complete actionlint replacement. Each item notes whether the **schema-driv
 thesis helps** — because most of the remaining value does NOT come from a schema, and
 pretending otherwise is how this project would mislead its users.
 
+## Status
+
+**MVP: complete.** **Full check parity (ADR-0006): all 8 steps complete** — expression
+engine, expression type system, expression checking wired in, context availability, `needs`
+graph, `uses` format, shellcheck/pyflakes, and security/misc (injection, credentials,
+deprecations, cron). Every check is on by default and validated for ZERO false positives
+across a 29-workflow real-world corpus. Remaining items below are refinements and ecosystem
+polish (JSON output, config file, action-metadata resolution, release binaries), not core
+linting gaps.
+
 ## v1 (MVP) — in scope
 - [x] Parse workflow YAML into a form we can validate. (`src/yaml.rs`)
 - [x] Validate **structure** against vendored SchemaStore `github-workflow.json`.
@@ -90,10 +100,13 @@ pretending otherwise is how this project would mislead its users.
       `ruleId` (structure/required, /type, ...), a full region (start+end from the span),
       and a stable partial fingerprint. Verified against GitHub's SARIF-support docs.
   - [ ] Follow-up: plain JSON output; a problem-matcher path as a lighter alternative.
-- [ ] `-ignore` filtering.
+- [x] **`--ignore <REGEX>` filtering** (`src/filter.rs`) — actionlint-compatible: suppress
+      diagnostics by message regex, repeatable, fails fast on an invalid pattern.
+- [x] **`--no-external`** flag to disable shellcheck/pyflakes.
 - [ ] Composite action + multi-target release binaries (cross-compilation) — faster,
       cross-OS UX vs the v1 Docker action.
 - [ ] pre-commit hook, Docker image, editor integrations, WASM playground.
+- [ ] plain JSON output; Go-template/custom output; `.github/actionlint.yaml` config file.
 
 ## North star (option B) — DONE (first cut)
 - [x] **DSL→JSON-Schema transpiler** (`src/transpile.rs`): full-fidelity transpile of
