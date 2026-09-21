@@ -16,6 +16,7 @@ pub mod humanize;
 pub mod json_out;
 pub mod lint;
 pub mod reconcile;
+pub mod reusable;
 pub mod run_lint;
 pub mod runner;
 pub mod sarif;

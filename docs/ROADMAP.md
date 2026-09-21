@@ -109,7 +109,15 @@ data-driven webhook/reusable-workflow typing, not core linting gaps.
         flags `if: true` / `if: ${{ false }}` (unambiguous constants only; no arbitrary
         constant-folding, to stay zero-FP). On by default; corpus-clean.
   - [ ] Follow-up: glob syntax, deprecated action versions.
-- [ ] **Reusable workflow (`workflow_call`)** input/output/secret typing.
+- [x] **Reusable workflow (`workflow_call`)** input/secret typing (`src/reusable.rs`) — for a
+      **local** callee (`uses: ./....yml`, resolved offline relative to the caller), reads the
+      callee's `on.workflow_call` contract and checks the caller job: required inputs supplied,
+      no unknown inputs, required secrets supplied (`secrets: inherit` disables the secret
+      check). Remote callees (`@ref`) need network and are skipped; a missing/non-reusable
+      callee is skipped, not spuriously flagged. Rules `reusable/input`, `reusable/secret`.
+      On by default; corpus-clean and clean on a real repo (digital-order-processing) that
+      calls local reusable workflows — and verified to catch an injected bogus input against
+      that repo's real contracts. (Output typing not yet checked.)
 
 ### Diagnostic quality (post-MVP polish)
 - [x] **`oneOf` error messages humanized** (`src/humanize.rs`). Descends failed `oneOf`

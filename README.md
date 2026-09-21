@@ -19,6 +19,11 @@ regression-gated resync pipeline, rather than hand-coded rules. The semantic che
   errors, and enforces **context availability by position** (e.g. `secrets` is not available
   in `runs-on`).
 - **Job graph** — `needs:` referencing undefined jobs, and dependency cycles.
+- **Dataflow** — `steps.<id>...` must name a step defined in the same job; `needs.<job>...`
+  must name a job listed in `needs:`.
+- **Reusable workflows** — a job calling a *local* `workflow_call` workflow
+  (`uses: ./....yml`) is checked against the callee's declared inputs/secrets (required
+  supplied, no unknowns; `secrets: inherit` respected). Remote callees need network, skipped.
 - **Action references** — `uses:` must be a valid `owner/repo@ref`, `./local`, or
   `docker://image` (a pinned ref is required for repository actions).
 - **Scripts** — if `shellcheck` / `pyflakes` are installed, `run:` blocks are linted through

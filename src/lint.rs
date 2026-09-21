@@ -13,7 +13,9 @@ use jsonschema::Validator;
 use crate::config::Config;
 use crate::diagnostic::{Diagnostic, Position};
 use crate::run_lint::{self, RunLinters};
-use crate::{checks, dataflow, enums, expr_lint, graph, humanize, runner, span, uses, yaml};
+use crate::{
+    checks, dataflow, enums, expr_lint, graph, humanize, reusable, runner, span, uses, yaml,
+};
 
 /// Lint one workflow file's source text. Uses auto-detected external `run:` linters
 /// (shellcheck/pyflakes if installed). For explicit control, use [`lint_source_with`].
@@ -104,6 +106,16 @@ pub fn lint_source_full(
 
     // Dataflow pass: undefined step-id references and non-needed job references.
     for f in dataflow::check(&parsed.json) {
+        let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
+            .unwrap_or_else(|| Position::new(1, 1));
+        diagnostics.push(
+            Diagnostic::new(path.to_path_buf(), pos, f.pointer, f.message).with_rule_id(f.rule_id),
+        );
+    }
+
+    // Reusable-workflow pass: check `with:`/`secrets:` of local `workflow_call` jobs against
+    // the callee's declared contract (local `./` callees only; remote needs network).
+    for f in reusable::check(&parsed.json, path) {
         let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
             .unwrap_or_else(|| Position::new(1, 1));
         diagnostics.push(
