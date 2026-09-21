@@ -1,7 +1,13 @@
-# v1 GitHub Action: a thin Docker wrapper over the actionlint-rs CLI.
-# Composite + multi-target release binaries are deferred (see docs/ROADMAP.md).
+# GitHub Action: a composite action that runs the actionlint-rs CLI.
+#
+# It downloads the prebuilt release binary matching this action's version and the runner's
+# OS/architecture — far faster and more portable than building a Docker image per run. When no
+# matching prebuilt binary is available (e.g. running from a branch/PR ref before a release, or
+# a target with no published asset), it falls back to building from source with cargo.
+#
+# The Docker-based action is kept at Dockerfile for anyone who prefers `runs: using: docker`.
 name: "actionlint-rs"
-description: "Schema-driven GitHub Actions workflow linter (structural checks)."
+description: "Schema-driven GitHub Actions workflow linter (structural + expression checks)."
 branding:
   icon: "check-circle"
   color: "purple"
@@ -12,8 +18,80 @@ inputs:
       .github/workflows/*.{yml,yaml} in the repository.
     required: false
     default: ""
-runs:
-  using: "docker"
-  image: "Dockerfile"
+  version:
+    description: >-
+      Release version to download (e.g. `1.2.0`, or `v1.2.0`). Defaults to the ref this action
+      was referenced at when that ref is a version tag; otherwise falls back to building from
+      source.
+    required: false
+    default: ""
   args:
-    - ${{ inputs.files }}
+    description: Extra arguments passed through to the CLI (e.g. `--format sarif`).
+    required: false
+    default: ""
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve and run actionlint-rs
+      shell: bash
+      env:
+        INPUT_FILES: ${{ inputs.files }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_ARGS: ${{ inputs.args }}
+        # The ref this action was checked out at (a tag like v1.2.0 for a released consumer).
+        ACTION_REF: ${{ github.action_ref }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+
+        repo="jreed91/actionlint-rs"
+
+        # 1. Determine the version to fetch: explicit input, else a v-tag action ref.
+        version="${INPUT_VERSION#v}"
+        if [[ -z "$version" && "${ACTION_REF:-}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          version="${ACTION_REF#v}"
+        fi
+
+        # 2. Map the runner OS/arch to a release target triple.
+        os="$(uname -s)"; arch="$(uname -m)"
+        target=""
+        ext="tar.gz"
+        case "$os:$arch" in
+          Linux:x86_64)            target="x86_64-unknown-linux-musl" ;;
+          Linux:aarch64|Linux:arm64) target="aarch64-unknown-linux-musl" ;;
+          Darwin:arm64)            target="aarch64-apple-darwin" ;;
+          *) target="" ;;  # unknown host (incl. Windows via bash) -> build from source
+        esac
+
+        bin="actionlint-rs"
+
+        # 3. Try to download the prebuilt binary for this version+target.
+        got_binary=""
+        if [[ -n "$version" && -n "$target" ]]; then
+          asset="actionlint-rs-${version}-${target}.${ext}"
+          echo "Fetching prebuilt $asset ..."
+          if gh release download "v${version}" --repo "$repo" --pattern "$asset" --dir . 2>/dev/null; then
+            tar -xzf "$asset"
+            bin="$(pwd)/actionlint-rs-${version}-${target}/actionlint-rs"
+            chmod +x "$bin"
+            got_binary=1
+            echo "Using prebuilt binary: $bin"
+          else
+            echo "No prebuilt asset $asset; will build from source."
+          fi
+        fi
+
+        # 4. Fallback: build from source (works on any ref, incl. branches/PRs and Windows).
+        if [[ -z "$got_binary" ]]; then
+          if ! command -v cargo >/dev/null 2>&1; then
+            echo "::error::no prebuilt binary for ${target:-this host} and cargo is not available to build from source"
+            exit 2
+          fi
+          echo "Building actionlint-rs from source (this can take a minute) ..."
+          cargo build --release --quiet
+          bin="$(pwd)/target/release/actionlint-rs"
+        fi
+
+        # 5. Run. An empty files input falls through to workflow discovery (do not pass "").
+        # shellcheck disable=SC2086
+        "$bin" $INPUT_ARGS $INPUT_FILES
