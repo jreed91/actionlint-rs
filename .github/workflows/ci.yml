@@ -11,13 +11,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --verbose
-      - run: cargo test --verbose
+      # Cache the cargo registry + target dir across runs so compilation is incremental.
+      - uses: Swatinem/rust-cache@v2
+      # Build the release CLI ONCE, then reuse that same binary for the corpus gate below
+      # (via ACTIONLINT_RS_BIN) instead of letting run-corpus.sh rebuild it.
+      - name: Build release CLI (once)
+        run: cargo build --release --verbose
+      - name: Tests (unit + integration)
+        run: cargo test --verbose
       - name: Golden corpus regression gate
+        # Reuses the release binary built above rather than compiling again.
+        env:
+          ACTIONLINT_RS_BIN: ./target/release/actionlint-rs
         run: ./scripts/run-corpus.sh
       - name: Cross-validation gate (first-party vs SchemaStore drift)
         # Fails if the two schemas' disagreements on real workflows drift from the checked-in
-        # baseline (corpus/xval/BASELINE.txt). See tests/xval.rs.
+        # baseline (corpus/xval/BASELINE.txt). See tests/xval.rs. Reuses the cached target dir
+        # and artifacts from the build/test steps above.
         run: cargo test --test xval
 
   coverage:
@@ -27,6 +37,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+      # Coverage needs its own instrumented build (separate target dir), but caching still
+      # speeds up dependency compilation across runs.
+      - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
       - name: Library coverage gate (see docs/coverage.md)
         # 100% of *reachable* library code. main.rs (CLI glue) is excluded (covered by
