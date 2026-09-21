@@ -156,6 +156,45 @@ fn sarif_format_emits_valid_sarif_and_exit_one_on_problems() {
 }
 
 #[test]
+fn json_format_emits_array_of_diagnostics_and_exit_one() {
+    let dir = tmpdir("json");
+    let f = dir.join("wf.yml");
+    std::fs::write(&f, "on: push\njobs:\n  b:\n    steps: [{run: hi}]\n").unwrap();
+    let out = Command::new(bin())
+        .arg(&f)
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("valid JSON");
+    let arr = v.as_array().expect("top-level array");
+    assert!(!arr.is_empty());
+    assert_eq!(arr[0]["rule"], "structure/required");
+    assert!(arr[0]["line"].is_number());
+    assert!(arr[0]["message"].is_string());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn json_format_on_clean_file_is_empty_array_exit_zero() {
+    let dir = tmpdir("json-clean");
+    let f = dir.join("wf.yml");
+    std::fs::write(
+        &f,
+        "on: push\njobs:\n  b:\n    runs-on: ubuntu-latest\n    steps: [{run: hi}]\n",
+    )
+    .unwrap();
+    let out = Command::new(bin()).arg(&f).arg("--format").arg("json").output().unwrap();
+    assert!(out.status.success());
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 0);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn sarif_format_on_clean_file_is_valid_and_exit_zero() {
     let dir = tmpdir("sarif-clean");
     let f = dir.join("wf.yml");

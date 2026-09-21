@@ -14,7 +14,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::Parser;
 
-use actionlint_rs::{diagnostic::Diagnostic, filter::IgnoreFilter, lint, sarif, schema};
+use actionlint_rs::{diagnostic::Diagnostic, filter::IgnoreFilter, json_out, lint, sarif, schema};
 use clap::ValueEnum;
 
 #[derive(Parser, Debug)]
@@ -70,6 +70,8 @@ enum Format {
     Human,
     /// SARIF 2.1.0 JSON, for GitHub code-scanning inline annotations.
     Sarif,
+    /// Plain JSON array of diagnostics, for scripting / `jq`.
+    Json,
 }
 
 fn main() -> ExitCode {
@@ -124,10 +126,12 @@ fn run() -> Result<bool> {
 
         if targets.is_empty() {
             eprintln!("actionlint-rs: no workflow files found under .github/workflows/");
-            // In SARIF mode still emit a valid (empty) document so an upload step has
-            // something well-formed to consume.
-            if cli.format == Format::Sarif {
-                println!("{}", sarif::to_sarif(&[]));
+            // In a machine format still emit a valid (empty) document so a consuming step
+            // has something well-formed to parse.
+            match cli.format {
+                Format::Sarif => println!("{}", sarif::to_sarif(&[])),
+                Format::Json => println!("{}", json_out::to_json(&[])),
+                Format::Human => {}
             }
             return Ok(false);
         }
@@ -148,6 +152,9 @@ fn run() -> Result<bool> {
         }
         Format::Sarif => {
             println!("{}", sarif::to_sarif(&all));
+        }
+        Format::Json => {
+            println!("{}", json_out::to_json(&all));
         }
     }
     Ok(!all.is_empty())
