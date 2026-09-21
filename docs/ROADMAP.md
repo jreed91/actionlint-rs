@@ -139,8 +139,11 @@ data-driven webhook/reusable-workflow typing, not core linting gaps.
       fail shallow by rejecting the instance's own keys), and renders the leaf in plain
       language, re-anchored to the deepest node. E.g. a job missing `runs-on` now reports
       `` `build` is missing required key `runs-on` `` instead of the schema jargon.
-  - [ ] Follow-up: ambiguous job branches (only `with:`, no `runs-on`/`uses`) report
-        "missing runs-on"; could detect `with:`/`secrets:` as a reusable-job signal.
+  - [x] Follow-up: **ambiguous job branches** — a job with `with:`/`secrets:` but no
+        `runs-on`/`uses` is now reported as missing `uses` (a reusable-workflow call), not the
+        misleading "missing runs-on". Detected in `humanize` via the job instance's shape,
+        before the generic `oneOf` branch scoring. Works under both schema sources; corpus- and
+        gate-clean.
 
 ### Distribution / ecosystem parity (post-MVP)
 - [x] **SARIF 2.1.0 output** (`--format sarif`, `src/sarif.rs`) — enables inline PR
