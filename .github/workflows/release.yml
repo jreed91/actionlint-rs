@@ -117,6 +117,10 @@ jobs:
 
       - name: Build (native)
         if: ${{ !matrix.cross }}
+        # Force bash so `$TARGET` resolves the same on macOS and Windows. Windows' default
+        # shell is PowerShell, where `$TARGET` is empty (it'd need `$env:TARGET`) — which made
+        # `cargo build --target ""` fail with "target was empty".
+        shell: bash
         env:
           TARGET: ${{ matrix.target }}
         run: cargo build --release --locked --target "$TARGET"
