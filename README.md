@@ -25,7 +25,8 @@ from GitHub's first-party DSL, so it resyncs with the schema.
 
 If `shellcheck` / `pyflakes` are installed, `run:` script blocks are linted through them
 (`--no-external` disables this). It also checks the `needs:` job graph (undefined jobs,
-cycles) and `uses:` reference format.
+cycles), `uses:` reference format, security issues (script injection from untrusted input,
+hardcoded credentials), deprecated workflow commands, and cron syntax.
 
 Still **does not** (yet) check:
 - context/property availability or dataflow (`steps.x.outputs`, `needs`, `secrets`);

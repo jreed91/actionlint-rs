@@ -61,16 +61,19 @@ pretending otherwise is how this project would mislead its users.
       (containing `$`) are skipped. On by default; ZERO false positives across the 29 real
       workflows (surfaced + handled home-assistant's `$/...` substitution form).
   - [ ] Follow-up (needs network): resolve `action.yml` to type-check `with:` inputs.
-- [ ] **Reusable workflow (`workflow_call`)** input/output/secret typing.
 - [x] **shellcheck / pyflakes** integration for `run:` blocks (`src/run_lint.rs`, step 7):
       detects the effective shell (step/job/workflow default, else bash), spawns shellcheck
       (bash/sh/dash/ksh) or pyflakes (python) via stdin, maps findings to the `run:` node.
       Optional — silently skipped if the tool isn't installed. `--no-external` disables them
       (used by the corpus gate, which tests structural/expression correctness, not tool
       opinions). Rule ids `run/shellcheck`, `run/pyflakes`.
-- [ ] **Security checks** — script-injection from untrusted input; hardcoded credentials.
-- [ ] **Misc semantic** — glob syntax, cron syntax, deprecated actions/commands,
-      constant `if:` conditions.
+- [x] **Security + misc checks** (`src/checks.rs`, step 8): script-injection from untrusted
+      free-text input (`github.event.*` titles/bodies/messages/names, `head_ref`; NOT
+      constrained fields like `.sha`/`base.ref`), hardcoded credentials in `credentials`
+      blocks, deprecated `::set-output::`/`::save-state::` commands, and cron-syntax
+      validation. On by default; ZERO false positives across the 29-workflow xval corpus.
+  - [ ] Follow-up: glob syntax, constant `if:` conditions, deprecated action versions.
+- [ ] **Reusable workflow (`workflow_call`)** input/output/secret typing.
 
 ### Diagnostic quality (post-MVP polish)
 - [x] **`oneOf` error messages humanized** (`src/humanize.rs`). Descends failed `oneOf`

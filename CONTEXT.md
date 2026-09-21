@@ -63,9 +63,9 @@ NOT the schema validation itself, which is an off-the-shelf crate.
 - **License:** MIT (matches actionlint; conventional; permits borrowing test/corpus ideas).
 - **v1 output:** human-readable `file:line:col: message` only. SARIF/JSON (and the inline
   PR annotations SARIF enables) deferred post-MVP.
-- **Expressions opaque in v1.** `${{ }}` is treated as an opaque string; v1 does NOT
-  validate inside it. A structurally-valid workflow with a broken expression PASSES v1.
-  Documented known limitation.
+- **Expressions were opaque in the MVP; NO LONGER.** Superseded by ADR-0006 (full check
+  parity): `${{ }}` is now lexed, parsed, and type-checked (contexts, functions, arity,
+  availability by position). See `src/expr/`, `src/expr_lint.rs`.
 - **CLI is the primitive.** The linter is a CLI first; the GitHub Action is a thin
   wrapper over it. v1 Action = **Docker-based** (`runs: using: docker`), fewest moving
   parts. Composite + multi-target release binaries deferred (post-MVP UX/speed).

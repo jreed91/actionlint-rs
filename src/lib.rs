@@ -3,6 +3,7 @@
 //! v1 validates workflow **structure** against the vendored SchemaStore schema and reports
 //! precise `file:line:col` diagnostics. See CONTEXT.md and docs/ for the design.
 
+pub mod checks;
 pub mod diagnostic;
 pub mod expr;
 pub mod expr_lint;
