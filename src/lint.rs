@@ -10,9 +10,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use jsonschema::Validator;
 
+use crate::config::Config;
 use crate::diagnostic::{Diagnostic, Position};
 use crate::run_lint::{self, RunLinters};
-use crate::{checks, expr_lint, graph, humanize, span, uses, yaml};
+use crate::{checks, expr_lint, graph, humanize, runner, span, uses, yaml};
 
 /// Lint one workflow file's source text. Uses auto-detected external `run:` linters
 /// (shellcheck/pyflakes if installed). For explicit control, use [`lint_source_with`].
@@ -28,6 +29,22 @@ pub fn lint_source_with(
     path: &Path,
     source: &str,
     run_linters: &RunLinters,
+) -> Result<Vec<Diagnostic>> {
+    lint_source_full(validator, path, source, run_linters, &Config::default())
+}
+
+/// Lint one workflow file's source text, with explicit external-linter control **and** a
+/// loaded [`Config`] (`.github/actionlint.yaml`). The config supplies self-hosted runner
+/// labels for `runs-on` checking; message-regex `ignore` patterns are applied by the caller
+/// (they compose with `--ignore`), not here.
+///
+/// `path` is used only for diagnostic display; `source` is the file contents.
+pub fn lint_source_full(
+    validator: &Validator,
+    path: &Path,
+    source: &str,
+    run_linters: &RunLinters,
+    config: &Config,
 ) -> Result<Vec<Diagnostic>> {
     let parsed = yaml::parse(source)
         .with_context(|| format!("could not parse {}", path.display()))?;
@@ -72,6 +89,19 @@ pub fn lint_source_with(
         );
     }
 
+    // Runner-label pass (opt-in): `runs-on` labels must be known GitHub-hosted labels or
+    // declared self-hosted labels (from config). Off by default — see the `runner` module.
+    if config.check_runner_labels {
+        for f in runner::check(&parsed.json, &config.self_hosted_runner_labels) {
+            let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
+                .unwrap_or_else(|| Position::new(1, 1));
+            diagnostics.push(
+                Diagnostic::new(path.to_path_buf(), pos, f.pointer, f.message)
+                    .with_rule_id(f.rule_id),
+            );
+        }
+    }
+
     // Security + misc pass: script injection, hardcoded creds, deprecated commands, cron.
     for f in checks::check(&parsed.json) {
         let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
@@ -109,9 +139,19 @@ pub fn lint_file_with(
     path: &Path,
     run_linters: &RunLinters,
 ) -> Result<Vec<Diagnostic>> {
+    lint_file_full(validator, path, run_linters, &Config::default())
+}
+
+/// Lint a file on disk, with explicit external-linter control and a loaded [`Config`].
+pub fn lint_file_full(
+    validator: &Validator,
+    path: &Path,
+    run_linters: &RunLinters,
+    config: &Config,
+) -> Result<Vec<Diagnostic>> {
     let source = std::fs::read_to_string(path)
         .with_context(|| format!("could not read {}", path.display()))?;
-    lint_source_with(validator, path, &source, run_linters)
+    lint_source_full(validator, path, &source, run_linters, config)
 }
 
 /// Lint a file on disk (auto-detected external linters).
@@ -125,7 +165,17 @@ pub fn lint_stdin_with(
     source: &str,
     run_linters: &RunLinters,
 ) -> Result<Vec<Diagnostic>> {
-    lint_source_with(validator, &PathBuf::from("<stdin>"), source, run_linters)
+    lint_stdin_full(validator, source, run_linters, &Config::default())
+}
+
+/// Lint stdin with explicit linter control and a loaded [`Config`].
+pub fn lint_stdin_full(
+    validator: &Validator,
+    source: &str,
+    run_linters: &RunLinters,
+    config: &Config,
+) -> Result<Vec<Diagnostic>> {
+    lint_source_full(validator, &PathBuf::from("<stdin>"), source, run_linters, config)
 }
 
 /// Lint stdin (auto-detected external linters).

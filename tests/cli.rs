@@ -136,6 +136,88 @@ fn invalid_ignore_pattern_is_usage_error_exit_two() {
 }
 
 #[test]
+fn config_ignore_suppresses_diagnostics() {
+    // A committed `.github/actionlint.yaml` `ignore:` entry suppresses like --ignore.
+    let dir = tmpdir("cfg-ignore");
+    let wf = dir.join(".github").join("workflows");
+    std::fs::create_dir_all(&wf).unwrap();
+    std::fs::write(wf.join("ci.yml"), "on: push\njobs:\n  b:\n    steps: [{run: hi}]\n").unwrap();
+    // Without config: exit 1 (missing runs-on).
+    let out = Command::new(bin()).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    // With config ignoring the message: exit 0.
+    std::fs::write(
+        dir.join(".github").join("actionlint.yaml"),
+        "ignore:\n  - 'runs-on'\n",
+    )
+    .unwrap();
+    let out = Command::new(bin()).current_dir(&dir).output().unwrap();
+    assert!(out.status.success(), "config ignore should suppress. stderr: {}", String::from_utf8_lossy(&out.stderr));
+    // And --no-config restores the finding.
+    let out = Command::new(bin()).arg("--no-config").current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn malformed_config_is_usage_error_exit_two() {
+    let dir = tmpdir("cfg-bad");
+    let wf = dir.join(".github").join("workflows");
+    std::fs::create_dir_all(&wf).unwrap();
+    std::fs::write(wf.join("ci.yml"), "on: push\njobs:\n  b:\n    runs-on: ubuntu-latest\n    steps: [{run: hi}]\n").unwrap();
+    std::fs::write(
+        dir.join(".github").join("actionlint.yaml"),
+        "self-hosted-runner:\n  labels: not-a-list\n",
+    )
+    .unwrap();
+    let out = Command::new(bin()).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("must be a list"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn runner_label_check_is_opt_in_and_config_aware() {
+    let dir = tmpdir("runner");
+    let f = dir.join("wf.yml");
+    std::fs::write(
+        &f,
+        "on: push\njobs:\n  b:\n    runs-on: totally-made-up-label\n    steps: [{run: hi}]\n",
+    )
+    .unwrap();
+    // Default: not checked, exit 0.
+    let out = Command::new(bin()).arg(&f).output().unwrap();
+    assert!(out.status.success(), "runner check should be off by default");
+    // Opt-in: flagged, exit 1.
+    let out = Command::new(bin()).arg(&f).arg("--check-runner-labels").output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("unknown runner label"));
+    // Opt-in + config declaring the label: clean.
+    let cfg = dir.join("cfg.yaml");
+    std::fs::write(&cfg, "self-hosted-runner:\n  labels: [totally-made-up-label]\n").unwrap();
+    let out = Command::new(bin())
+        .arg(&f)
+        .arg("--check-runner-labels")
+        .arg("--config")
+        .arg(&cfg)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "declared label should be accepted. stdout: {}", String::from_utf8_lossy(&out.stdout));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn missing_explicit_config_is_usage_error() {
+    let out = Command::new(bin())
+        .arg("-")
+        .arg("--config")
+        .arg("/no/such/config.yaml")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
 fn sarif_format_emits_valid_sarif_and_exit_one_on_problems() {
     let dir = tmpdir("sarif");
     let f = dir.join("wf.yml");
