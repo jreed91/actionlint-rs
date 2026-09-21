@@ -114,7 +114,15 @@ data-driven webhook/reusable-workflow typing, not core linting gaps.
   - [x] Follow-up: **constant `if:` conditions** (`src/checks.rs`, rule `misc/constant-if`) —
         flags `if: true` / `if: ${{ false }}` (unambiguous constants only; no arbitrary
         constant-folding, to stay zero-FP). On by default; corpus-clean.
-  - [ ] Follow-up: glob syntax, deprecated action versions.
+  - [x] Follow-up: **glob syntax** (`src/globs.rs`, rule `glob/syntax`) — validates
+        `on.<event>.{branches,tags,paths}[-ignore]` patterns for the *unambiguous* structural
+        errors only (unclosed `[` character class, empty pattern), honoring escapes and the
+        literal-first-`]` rule. Deliberately narrow (GitHub's filter dialect has subtle rules;
+        over-flagging would break the zero-FP bar). On by default; corpus-clean.
+  - [ ] Follow-up: deprecated action versions — deferred deliberately. A reliable list is
+        network-sourced and time-sensitive (action authors deprecate on their own cadence); a
+        hardcoded list would be stale and false-positive-prone, violating the zero-FP bar.
+        Best done later as a resync-able dataset, not hand-coded.
 - [x] **Reusable workflow (`workflow_call`)** input/secret typing (`src/reusable.rs`) — for a
       **local** callee (`uses: ./....yml`, resolved offline relative to the caller), reads the
       callee's `on.workflow_call` contract and checks the caller job: required inputs supplied,

@@ -14,8 +14,8 @@ use crate::config::Config;
 use crate::diagnostic::{Diagnostic, Position};
 use crate::run_lint::{self, RunLinters};
 use crate::{
-    checks, dataflow, enums, events, expr_lint, graph, humanize, reusable, runner, span, uses,
-    yaml,
+    checks, dataflow, enums, events, expr_lint, globs, graph, humanize, reusable, runner, span,
+    uses, yaml,
 };
 
 /// Lint one workflow file's source text. Uses auto-detected external `run:` linters
@@ -126,6 +126,15 @@ pub fn lint_source_full(
 
     // Event pass: `on:` event names and activity types.
     for f in events::check(&parsed.json) {
+        let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
+            .unwrap_or_else(|| Position::new(1, 1));
+        diagnostics.push(
+            Diagnostic::new(path.to_path_buf(), pos, f.pointer, f.message).with_rule_id(f.rule_id),
+        );
+    }
+
+    // Glob pass: unambiguous syntax errors in `on.<event>.{branches,tags,paths}` filters.
+    for f in globs::check(&parsed.json) {
         let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
             .unwrap_or_else(|| Position::new(1, 1));
         diagnostics.push(
