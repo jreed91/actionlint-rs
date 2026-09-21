@@ -6,6 +6,7 @@
 pub mod checks;
 pub mod config;
 pub mod diagnostic;
+pub mod enums;
 pub mod expr;
 pub mod expr_lint;
 pub mod filter;
