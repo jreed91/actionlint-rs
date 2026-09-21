@@ -34,11 +34,26 @@ mv "$tmp" Cargo.toml
 
 echo "set-version.sh: Cargo.toml version -> $VERSION"
 
-# Refresh Cargo.lock so the locked package version matches. `--offline` avoids a network hit;
-# the lockfile already has every dependency, only our own package version changes.
-if command -v cargo >/dev/null 2>&1; then
-  cargo update --offline -p actionlint-rs --precise "$VERSION" 2>/dev/null \
-    || cargo generate-lockfile --offline 2>/dev/null \
-    || true
-  echo "set-version.sh: Cargo.lock refreshed"
+# Keep Cargo.lock's own-package version in sync with Cargo.toml. A mismatch makes
+# `cargo build --locked` (used by the release build job) fail, so this must be reliable — we
+# edit the lockfile directly rather than depend on `cargo update` succeeding in CI.
+#
+# The lockfile lists our package as:
+#   [[package]]
+#   name = "actionlint-rs"
+#   version = "<x.y.z>"
+# Update only the `version` line that immediately follows our package's `name` line.
+if [[ -f Cargo.lock ]]; then
+  tmp="$(mktemp)"
+  awk -v v="$VERSION" '
+    /^name = "actionlint-rs"$/ { found=1 }
+    found && /^version = "[^"]+"/ { sub(/"[^"]+"/, "\"" v "\""); found=0 }
+    { print }
+  ' Cargo.lock > "$tmp"
+  mv "$tmp" Cargo.lock
+  echo "set-version.sh: Cargo.lock own-package version -> $VERSION"
+  # Best-effort validation that the two now agree (never fatal in CI).
+  if command -v cargo >/dev/null 2>&1; then
+    cargo update --offline -p actionlint-rs --precise "$VERSION" >/dev/null 2>&1 || true
+  fi
 fi

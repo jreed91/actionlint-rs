@@ -13,16 +13,26 @@ merge to main
 release job (.github/workflows/release.yml)
    • semantic-release reads the commits since the last release
    • computes the next version from Conventional Commits
-   • runs scripts/set-version.sh <version>  → bumps Cargo.toml + Cargo.lock
+   • runs scripts/set-version.sh <version>  → bumps Cargo.toml AND Cargo.lock (kept in sync so
+     the build job's `cargo build --locked` doesn't fail)
    • commits the bump: "chore(release): X.Y.Z [skip ci]"
    • creates the git tag vX.Y.Z + a GitHub Release with generated notes
+   • exposes `published` + `version` as job outputs
    │
-   ▼  (release: published)
+   ▼  needs: release   (NOT the `release: published` event — see note below)
 build job (matrix)
    • cross-compiles the CLI for each target
    • packages actionlint-rs-X.Y.Z-<target>.(tar.gz|zip) + .sha256
    • uploads them as assets on the release
 ```
+
+> **Why the build job uses `needs: release`, not `on: release: published`.** A release created
+> with the built-in `GITHUB_TOKEN` does **not** trigger further workflow runs — GitHub's
+> recursion guard suppresses the `release: published` event
+> ([docs](https://docs.github.com/en/actions/concepts/security/github_token)). So the build job
+> can't listen for that event; instead it depends on the `release` job and reads the version
+> from its outputs. (An alternative is to run semantic-release with a PAT / GitHub App token,
+> whose events *do* trigger workflows — but that needs an extra secret, which this setup avoids.)
 
 ## What triggers a version bump
 
