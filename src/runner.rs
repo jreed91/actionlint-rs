@@ -139,10 +139,14 @@ fn check_label(
 }
 
 fn is_known(label: &str, self_hosted_labels: &[String]) -> bool {
-    GITHUB_HOSTED_LABELS.contains(&label)
-        || SELF_HOSTED_CONVENTION.contains(&label)
-        // Case-insensitive match against configured self-hosted labels (GitHub matches
-        // labels case-insensitively).
+    // GitHub matches runner labels case-insensitively, so `Linux` == `linux`,
+    // `ubuntu-LATEST` == `ubuntu-latest`, etc. Compare everything case-insensitively.
+    GITHUB_HOSTED_LABELS
+        .iter()
+        .any(|l| l.eq_ignore_ascii_case(label))
+        || SELF_HOSTED_CONVENTION
+            .iter()
+            .any(|l| l.eq_ignore_ascii_case(label))
         || self_hosted_labels
             .iter()
             .any(|l| l.eq_ignore_ascii_case(label))
@@ -192,6 +196,16 @@ mod tests {
     fn self_hosted_convention_labels_are_clean() {
         let wf = json!({ "jobs": { "b": { "runs-on": ["self-hosted", "linux", "x64"] } } });
         assert!(findings(wf).is_empty());
+    }
+
+    #[test]
+    fn labels_match_case_insensitively() {
+        // GitHub matches labels case-insensitively: `Linux`, `Self-Hosted`, `Ubuntu-Latest`
+        // are all known.
+        for label in ["Linux", "Self-Hosted", "Ubuntu-Latest", "WINDOWS", "ARM64"] {
+            let wf = json!({ "jobs": { "b": { "runs-on": label } } });
+            assert!(findings(wf).is_empty(), "{label} should be known (case-insensitive)");
+        }
     }
 
     #[test]
