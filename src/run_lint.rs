@@ -103,19 +103,101 @@ fn lint_run(
 ) {
     // Default shell is bash on Linux/macOS (GitHub's default runner shell).
     let shell = shell.unwrap_or("bash");
+    // Neutralize GitHub `${{ }}` expressions before handing the script to a shell/python
+    // linter: they're substituted by the Actions runner before the script ever runs, so a
+    // linter seeing the raw `${{ }}` produces spurious syntax errors (e.g. shellcheck SC2296,
+    // "parameter expansions can't start with {"). We replace each expression with an inert,
+    // length-preserving placeholder so real findings still map to the right line.
     match classify_shell(shell) {
         Some(ShellKind::Posix(dialect)) => {
             if let Some(sc) = &linters.shellcheck {
-                out.extend(run_shellcheck(sc, script, dialect, pointer));
+                let neutralized = neutralize_expressions(script, Placeholder::ShellVar);
+                out.extend(run_shellcheck(sc, &neutralized, dialect, pointer));
             }
         }
         Some(ShellKind::Python) => {
             if let Some(pf) = &linters.pyflakes {
-                out.extend(run_pyflakes(pf, script, pointer));
+                let neutralized = neutralize_expressions(script, Placeholder::Ident);
+                out.extend(run_pyflakes(pf, &neutralized, pointer));
             }
         }
         None => {} // pwsh, cmd, custom — not linted
     }
+}
+
+/// How to render the inert placeholder for a neutralized `${{ }}` expression.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum Placeholder {
+    /// A shell **variable reference** (`$XXXX`): avoids SC2296 (no leading `${`) *and* SC2050
+    /// (a comparison against it isn't a constant expression, since it looks like a runtime
+    /// value).
+    ShellVar,
+    /// A bare identifier (`XXXX`): a valid name reference in Python (and shell), used for
+    /// pyflakes where `$` is not valid syntax.
+    Ident,
+}
+
+/// Replace every `${{ ... }}` GitHub Actions expression with an inert placeholder that is a
+/// valid token in both shell and Python. The placeholder is the same byte length as the
+/// original span (padded/truncated), so line and in-line column positions are preserved for
+/// the linter's own line reporting. Newlines inside the expression are kept so line numbers
+/// don't shift.
+///
+/// The placeholder style is chosen per target language (see [`Placeholder`]). This can't
+/// introduce a *new* SC2296/SC2050 false positive of its own.
+fn neutralize_expressions(script: &str, style: Placeholder) -> String {
+    let mut out = String::with_capacity(script.len());
+    let mut rest = script;
+    while let Some(start) = rest.find("${{") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 3..];
+        match after.find("}}") {
+            Some(end) => {
+                // The full original span is `${{` + inner + `}}`.
+                let inner = &after[..end];
+                let span_len = 3 + inner.len() + 2;
+                out.push_str(&placeholder_for(inner, span_len, style));
+                rest = &after[end + 2..];
+            }
+            None => {
+                // Unterminated `${{` — leave the remainder (from `${{` onward) as-is; the
+                // prefix before it was already pushed.
+                out.push_str(&rest[start..]);
+                return out;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Build a length-`target_len` placeholder that preserves any newlines in `inner` (so line
+/// numbers are stable). `ShellVar` emits `$` + `X`… (a variable reference); `Ident` emits a
+/// run of `X` (a bare name).
+fn placeholder_for(inner: &str, target_len: usize, style: Placeholder) -> String {
+    let newlines = inner.matches('\n').count();
+    // The first byte is `$` for a shell variable, else a name char. Remaining non-newline
+    // bytes are `X` (an uppercase identifier char, valid in both languages).
+    let lead = match style {
+        Placeholder::ShellVar => "$",
+        Placeholder::Ident => "X",
+    };
+    if newlines == 0 {
+        let body = target_len.saturating_sub(1);
+        return format!("{lead}{}", "X".repeat(body));
+    }
+    // Multi-line: emit the newlines so downstream line numbers don't shift; pad remaining
+    // width with `X`. Exact per-line columns after a multi-line expression are approximate,
+    // which is acceptable (same rationale as the existing line-granularity anchoring).
+    let non_newline = target_len.saturating_sub(newlines);
+    let body = non_newline.saturating_sub(1);
+    let mut s = String::with_capacity(target_len);
+    s.push_str(lead);
+    s.push_str(&"X".repeat(body));
+    for _ in 0..newlines {
+        s.push('\n');
+    }
+    s
 }
 
 enum ShellKind {
@@ -245,6 +327,64 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn neutralize_replaces_expressions_length_preserving() {
+        let s = "echo ${{ github.sha }}";
+        let n = neutralize_expressions(s, Placeholder::ShellVar);
+        assert_eq!(n.len(), s.len(), "length preserved: {n:?}");
+        assert!(!n.contains("${{"), "no expression left: {n:?}");
+        assert!(!n.contains("}}"));
+        // Shell placeholder is a variable reference: `$` then identifier chars.
+        assert_eq!(n, "echo $XXXXXXXXXXXXXXXX");
+    }
+
+    #[test]
+    fn neutralize_ident_style_is_a_bare_name() {
+        let s = "y = ${{ inputs.x }}";
+        let n = neutralize_expressions(s, Placeholder::Ident);
+        assert_eq!(n.len(), s.len());
+        assert!(!n.contains('$'), "python placeholder has no `$`: {n:?}");
+        assert!(n.starts_with("y = X"));
+    }
+
+    #[test]
+    fn neutralize_preserves_line_count() {
+        let s = "a=${{ fromJSON(\n  inputs.x\n) }}\necho $a";
+        let n = neutralize_expressions(s, Placeholder::ShellVar);
+        assert_eq!(
+            s.matches('\n').count(),
+            n.matches('\n').count(),
+            "line count preserved so findings map correctly: {n:?}"
+        );
+        assert!(!n.contains("${{"));
+    }
+
+    #[test]
+    fn neutralize_handles_multiple_and_embedded_expressions() {
+        let s = "tag=v${{ inputs.v }}-${{ github.run_id }}";
+        let n = neutralize_expressions(s, Placeholder::ShellVar);
+        assert!(!n.contains("${{"), "{n:?}");
+        assert_eq!(n.len(), s.len());
+        // The literal parts survive.
+        assert!(n.starts_with("tag=v"));
+        assert!(n.contains('-'));
+    }
+
+    #[test]
+    fn neutralize_leaves_plain_shell_vars_alone() {
+        // Only `${{ }}` is neutralized; ordinary `$VAR` / `${VAR}` are real shell and must
+        // stay so shellcheck can still lint them.
+        let s = "echo $HOME ${PATH}";
+        assert_eq!(neutralize_expressions(s, Placeholder::ShellVar), s);
+    }
+
+    #[test]
+    fn neutralize_handles_unterminated_expression() {
+        let s = "echo ${{ oops";
+        // No panic; remainder preserved.
+        assert_eq!(neutralize_expressions(s, Placeholder::ShellVar), s);
+    }
+
+    #[test]
     fn classify_shells() {
         assert!(matches!(classify_shell("bash"), Some(ShellKind::Posix("bash"))));
         assert!(matches!(classify_shell("sh"), Some(ShellKind::Posix("sh"))));
@@ -313,6 +453,62 @@ mod tests {
             "expected a shellcheck finding, got: {findings:?}"
         );
         assert_eq!(findings[0].pointer, "/jobs/b/steps/0/run");
+    }
+
+    #[test]
+    fn github_expression_does_not_cause_shellcheck_false_positive() {
+        // Regression: `${{ }}` used to trip shellcheck SC2296 ("parameter expansions can't
+        // start with {"). After neutralization, a script that is otherwise clean has no
+        // findings.
+        let Some(sc) = which("shellcheck") else { return };
+        let linters = RunLinters { shellcheck: Some(sc), pyflakes: None };
+        let wf = json!({
+            "jobs": { "b": { "runs-on": "x", "steps": [
+                { "run": "echo \"deploying ${{ github.sha }} to ${{ inputs.env }}\"" }
+            ] } }
+        });
+        let findings = check(&wf, &linters);
+        assert!(
+            findings.is_empty(),
+            "expression should be neutralized, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn expression_in_comparison_is_not_constant_false_positive() {
+        // Regression: `if [ "${{ inputs.x }}" = "true" ]` neutralized to a constant literal
+        // tripped shellcheck SC2050 ("this expression is constant"). Using a variable-
+        // reference placeholder avoids it.
+        let Some(sc) = which("shellcheck") else { return };
+        let linters = RunLinters { shellcheck: Some(sc), pyflakes: None };
+        let wf = json!({
+            "jobs": { "b": { "runs-on": "x", "steps": [
+                { "run": "if [ \"${{ inputs.run-all }}\" = \"true\" ]; then echo hi; fi" }
+            ] } }
+        });
+        let findings = check(&wf, &linters);
+        assert!(
+            findings.is_empty(),
+            "comparison against an expression should not be flagged constant, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn real_issue_still_found_alongside_expressions() {
+        // Neutralization must not hide genuine problems: an undefined var next to an
+        // expression is still flagged.
+        let Some(sc) = which("shellcheck") else { return };
+        let linters = RunLinters { shellcheck: Some(sc), pyflakes: None };
+        let wf = json!({
+            "jobs": { "b": { "runs-on": "x", "steps": [
+                { "run": "echo ${{ github.sha }}; echo $undefinedvar" }
+            ] } }
+        });
+        let findings = check(&wf, &linters);
+        assert!(
+            findings.iter().any(|f| f.message.contains("shellcheck SC")),
+            "genuine finding should survive, got: {findings:?}"
+        );
     }
 
     #[test]
