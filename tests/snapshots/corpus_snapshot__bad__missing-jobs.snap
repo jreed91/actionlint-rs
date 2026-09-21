@@ -1,0 +1,5 @@
+---
+source: tests/corpus_snapshot.rs
+expression: render(&path)
+---
+2:1 [structure/required] missing required key `jobs`

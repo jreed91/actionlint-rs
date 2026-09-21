@@ -1,0 +1,5 @@
+---
+source: tests/corpus_snapshot.rs
+expression: render(&path)
+---
+3:4 [event/name] unknown workflow event `pull-request`

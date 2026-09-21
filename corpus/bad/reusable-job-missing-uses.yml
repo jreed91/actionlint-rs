@@ -1,0 +1,8 @@
+# A job with `with:` (a reusable-workflow-call signal) but no `uses:` (and no `runs-on`).
+# This is an intended reusable-workflow call missing its `uses:`. Must produce >=1 diagnostic;
+# the humanizer should point at the real fix (missing `uses`), not "missing runs-on".
+on: push
+jobs:
+  deploy:
+    with:
+      environment: production

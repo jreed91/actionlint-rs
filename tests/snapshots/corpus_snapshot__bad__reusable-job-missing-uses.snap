@@ -1,0 +1,5 @@
+---
+source: tests/corpus_snapshot.rs
+expression: render(&path)
+---
+7:4 [structure/required] `deploy` is missing required key `uses` (a job with `with:`/`secrets:` is a reusable-workflow call and needs `uses:`)

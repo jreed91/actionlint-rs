@@ -1,0 +1,5 @@
+---
+source: tests/corpus_snapshot.rs
+expression: render(&path)
+---
+(no diagnostics)

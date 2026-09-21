@@ -1,0 +1,8 @@
+The workflow triggers on `pull-request`, which is not a real GitHub event (the
+event is `pull_request`, with an underscore). The event check (src/events.rs)
+validates `on:` names against the set derived from the SchemaStore `event` enum.
+
+Gate assertion (v1): at least one diagnostic.
+
+Expected message (rule event/name):
+  unknown workflow event `pull-request`

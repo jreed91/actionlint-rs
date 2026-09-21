@@ -1,0 +1,10 @@
+Job `deploy` carries `with:` (a reusable-workflow-call signal) but declares
+neither `uses:` nor `runs-on:`. It is an intended reusable-workflow call missing
+its `uses:`. The humanizer (src/humanize.rs) detects this instance shape and
+reports the real fix rather than the misleading "missing runs-on".
+
+Gate assertion (v1): at least one diagnostic.
+
+Expected message (rule structure/required):
+  `deploy` is missing required key `uses` (a job with `with:`/`secrets:` is a
+  reusable-workflow call and needs `uses:`)

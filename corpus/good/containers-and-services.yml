@@ -1,0 +1,48 @@
+# Known-GOOD: exercises job `container:` (image + options + env + credentials via secret)
+# and `services:` (with ports, options, health via env). Must lint clean.
+name: Integration tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    container:
+      image: node:20-bookworm
+      env:
+        NODE_ENV: test
+      ports:
+        - "3000"
+      options: --cpus 2
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.REGISTRY_TOKEN }}
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.PG_PASSWORD }}
+          POSTGRES_DB: app_test
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - "6379:6379"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: npm test
+        env:
+          DATABASE_URL: postgres://postgres:${{ secrets.PG_PASSWORD }}@postgres:5432/app_test
+          REDIS_URL: redis://redis:6379
