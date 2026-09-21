@@ -15,4 +15,5 @@ pub mod sarif;
 pub mod schema;
 pub mod transpile;
 pub mod span;
+pub mod uses;
 pub mod yaml;

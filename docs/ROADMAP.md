@@ -56,8 +56,11 @@ pretending otherwise is how this project would mislead its users.
 - [x] **`needs:` graph** (`src/graph.rs`, step 5) — undefined-job references + cycle
       detection (iterative DFS, one finding per cycle). On by default; ZERO false positives
       across the 29-workflow xval corpus.
-- [ ] **`uses:` / action-metadata validation** — resolve `action.yml`, type-check `with:`
-      inputs; popular-action metadata (actionlint's generated `popular_actions.json`).
+- [x] **`uses:` format validation** (`src/uses.rs`, step 6) — every `uses:` must be a valid
+      `owner/repo[/path]@ref` (ref required), `./local`, or `docker://image`; dynamic values
+      (containing `$`) are skipped. On by default; ZERO false positives across the 29 real
+      workflows (surfaced + handled home-assistant's `$/...` substitution form).
+  - [ ] Follow-up (needs network): resolve `action.yml` to type-check `with:` inputs.
 - [ ] **Reusable workflow (`workflow_call`)** input/output/secret typing.
 - [ ] **shellcheck** integration for `run:` bash/sh. (Spawn external binary.)
 - [ ] **pyflakes** integration for `run:` python. (Spawn external binary.)

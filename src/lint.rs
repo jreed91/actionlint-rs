@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use jsonschema::Validator;
 
 use crate::diagnostic::{Diagnostic, Position};
-use crate::{expr_lint, graph, humanize, span, yaml};
+use crate::{expr_lint, graph, humanize, span, uses, yaml};
 
 /// Lint one workflow file's source text against the compiled schema.
 ///
@@ -47,6 +47,16 @@ pub fn lint_source(validator: &Validator, path: &Path, source: &str) -> Result<V
         diagnostics.push(
             Diagnostic::new(path.to_path_buf(), pos, f.pointer, f.message)
                 .with_rule_id("graph/needs"),
+        );
+    }
+
+    // `uses:` pass: validate action-reference format.
+    for f in uses::check(&parsed.json) {
+        let pos = span::position_for_pointer(&parsed.marked, &f.pointer)
+            .unwrap_or_else(|| Position::new(1, 1));
+        diagnostics.push(
+            Diagnostic::new(path.to_path_buf(), pos, f.pointer, f.message)
+                .with_rule_id("uses/format"),
         );
     }
 
