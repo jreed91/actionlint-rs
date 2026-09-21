@@ -306,6 +306,38 @@ mod tests {
     }
 
     #[test]
+    fn no_jobs_and_no_permissions_is_clean() {
+        // Early returns: workflow with neither jobs nor permissions.
+        assert!(findings(json!({ "on": "push" })).is_empty());
+    }
+
+    #[test]
+    fn permissions_neither_string_nor_map_is_ignored() {
+        // A non-string, non-object permissions value hits the `_ => {}` arm.
+        assert!(findings(json!({ "permissions": ["read"] })).is_empty());
+    }
+
+    #[test]
+    fn dynamic_permission_level_skipped_and_nonstring_ignored() {
+        // Expression level is skipped; a non-string level value is ignored (not a string arm).
+        assert!(findings(json!({ "permissions": { "contents": "${{ inputs.l }}" } })).is_empty());
+        assert!(findings(json!({ "permissions": { "contents": 5 } })).is_empty());
+    }
+
+    #[test]
+    fn non_string_shell_is_ignored() {
+        // A non-string shell value hits the early `let Value::String else return`.
+        let wf = json!({ "jobs": { "b": { "runs-on": "x", "steps": [ { "shell": 3, "run": "x" } ] } } });
+        assert!(findings(wf).is_empty());
+    }
+
+    #[test]
+    fn dynamic_shell_is_skipped() {
+        let wf = json!({ "jobs": { "b": { "runs-on": "x", "steps": [ { "shell": "${{ inputs.sh }}", "run": "x" } ] } } });
+        assert!(findings(wf).is_empty());
+    }
+
+    #[test]
     fn valid_shells_are_clean() {
         for s in ["bash", "sh", "pwsh", "powershell", "cmd", "python"] {
             let wf = json!({ "jobs": { "b": { "runs-on": "x", "steps": [ { "shell": s, "run": "x" } ] } } });

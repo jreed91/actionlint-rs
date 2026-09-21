@@ -282,6 +282,30 @@ mod tests {
     }
 
     #[test]
+    fn no_on_key_is_clean() {
+        assert!(findings(json!({ "jobs": {} })).is_empty());
+    }
+
+    #[test]
+    fn on_as_bare_scalar_non_string_is_ignored() {
+        // `on:` that is neither string/array/object (e.g. a number) hits the `_ => {}` arm.
+        assert!(findings(json!({ "on": 5 })).is_empty());
+    }
+
+    #[test]
+    fn non_string_array_event_entry_is_ignored() {
+        // A non-string entry in the sequence form is skipped.
+        assert!(findings(json!({ "on": ["push", 42] })).is_empty());
+    }
+
+    #[test]
+    fn types_as_non_string_non_array_is_ignored() {
+        // A `types:` that is neither string nor array hits the `_ => return` arm.
+        let wf = json!({ "on": { "pull_request": { "types": 7 } } });
+        assert!(findings(wf).is_empty());
+    }
+
+    #[test]
     fn single_string_types_value_is_handled() {
         let wf = json!({ "on": { "issues": { "types": "opened" } } });
         assert!(findings(wf).is_empty());

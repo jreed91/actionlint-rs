@@ -179,4 +179,18 @@ mod tests {
         assert!(findings(json!({ "on": "push" })).is_empty());
         assert!(findings(json!({ "on": { "push": {} } })).is_empty());
     }
+
+    #[test]
+    fn event_with_non_object_config_is_skipped() {
+        // e.g. `on: { push: null }` or `on: { workflow_dispatch: {} }` — the config isn't an
+        // object with filter keys; hits the `continue`.
+        assert!(findings(json!({ "on": { "push": null } })).is_empty());
+        assert!(findings(json!({ "on": { "workflow_dispatch": "x" } })).is_empty());
+    }
+
+    #[test]
+    fn non_string_pattern_entry_is_ignored() {
+        // A non-string item in the glob list is skipped.
+        assert!(findings(json!({ "on": { "push": { "branches": [42] } } })).is_empty());
+    }
 }

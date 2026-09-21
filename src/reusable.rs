@@ -338,6 +338,42 @@ mod tests {
     }
 
     #[test]
+    fn unknown_secret_is_flagged() {
+        let (root, caller) = setup(
+            "unknown-sec",
+            "on:\n  workflow_call:\n    secrets:\n      token:\n        required: false\n",
+        );
+        let wf = json!({
+            "jobs": { "call": {
+                "uses": "./.github/workflows/reuse.yml",
+                "secrets": { "token": "${{ secrets.T }}", "bogus": "${{ secrets.B }}" }
+            } }
+        });
+        let f = check(&wf, &caller);
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert_eq!(f[0].rule_id, "reusable/secret");
+        assert!(f[0].message.contains("unknown secret `bogus`"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn callee_with_null_workflow_call_and_no_contract_items_is_clean() {
+        // `on: workflow_call:` with an empty/absent inputs+secrets is a valid reusable
+        // workflow; a caller passing nothing is clean (exercises empty-contract path).
+        let (root, caller) = setup("empty-contract", "on:\n  workflow_call:\n");
+        let wf = json!({ "jobs": { "call": { "uses": "./.github/workflows/reuse.yml" } } });
+        assert!(check(&wf, &caller).is_empty());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn job_without_uses_is_skipped() {
+        // A normal job (no `uses:`) is not a reusable call.
+        let wf = json!({ "jobs": { "b": { "runs-on": "x", "steps": [] } } });
+        assert!(check(&wf, Path::new("/tmp/x.yml")).is_empty());
+    }
+
+    #[test]
     fn secrets_inherit_disables_secret_checking() {
         let (root, caller) = setup(
             "inherit",

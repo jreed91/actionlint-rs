@@ -48,12 +48,17 @@ impl Config {
     /// Returns an error for malformed YAML or a mistyped known key (e.g. `labels` not a list),
     /// so misconfiguration surfaces loudly rather than silently doing nothing.
     pub fn parse(source: &str) -> Result<Self> {
-        // An empty/whitespace-only file (or one that is just comments) is the default config.
-        if source.trim().is_empty() {
+        // A file with no YAML content — empty, whitespace-only, or only comments — is the
+        // default config (an empty document isn't an error for an optional config file).
+        let has_content = source
+            .lines()
+            .map(|l| l.trim())
+            .any(|l| !l.is_empty() && !l.starts_with('#'));
+        if !has_content {
             return Ok(Config::default());
         }
         let value = yaml::parse_value(source).context("parsing config file")?;
-        // A file that parses to null (e.g. only comments) is also the default config.
+        // A file whose YAML resolves to null (e.g. `~`) is also the default config.
         if value.is_null() {
             return Ok(Config::default());
         }
@@ -160,6 +165,32 @@ mod tests {
     fn wrong_type_for_labels_is_an_error() {
         let err = Config::parse("self-hosted-runner:\n  labels: not-a-list\n").unwrap_err();
         assert!(err.to_string().contains("must be a list"), "{err}");
+    }
+
+    #[test]
+    fn only_comments_parses_to_default() {
+        // A file that is only comments/blank lines is the default config (no YAML content).
+        assert_eq!(Config::parse("# just a comment\n# another\n").unwrap(), Config::default());
+        assert_eq!(Config::parse("\n  \n# x\n").unwrap(), Config::default());
+    }
+
+    #[test]
+    fn explicit_null_document_is_default() {
+        // A YAML document that resolves to null (`~`) is the default config (is_null path).
+        assert_eq!(Config::parse("~\n").unwrap(), Config::default());
+    }
+
+    #[test]
+    fn list_coerces_bool_and_number_entries() {
+        // string_list accepts scalar bool/number entries, stringifying them.
+        let cfg = Config::parse("ignore:\n  - true\n  - 42\n  - real\n").unwrap();
+        assert_eq!(cfg.ignore, vec!["true", "42", "real"]);
+    }
+
+    #[test]
+    fn list_rejects_non_scalar_entry() {
+        let err = Config::parse("ignore:\n  - [nested, list]\n").unwrap_err();
+        assert!(err.to_string().contains("must be strings"), "{err}");
     }
 
     #[test]
