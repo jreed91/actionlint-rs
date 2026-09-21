@@ -1,0 +1,21 @@
+# pre-commit hook definitions, so other repos can run actionlint-rs on commit:
+#
+#   # .pre-commit-config.yaml in the consuming repo
+#   repos:
+#     - repo: https://github.com/jreed91/actionlint-rs
+#       rev: v0.1.0            # pin to a tag
+#       hooks:
+#         - id: actionlint-rs
+#
+# pre-commit builds the CLI from source via cargo (language: rust), so no separate install
+# is needed. The hook only fires on workflow files (files: pattern), and passes the changed
+# files as arguments — the CLI lints exactly those.
+- id: actionlint-rs
+  name: actionlint-rs
+  description: Lint GitHub Actions workflow files (schema-driven structural + expression checks).
+  entry: actionlint-rs
+  language: rust
+  # Only run on workflow files under .github/workflows/.
+  files: ^\.github/workflows/.*\.(yml|yaml)$
+  # The CLI accepts the file list pre-commit appends; no extra args needed.
+  args: []

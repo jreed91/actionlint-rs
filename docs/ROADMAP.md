@@ -11,9 +11,15 @@ pretending otherwise is how this project would mislead its users.
 engine, expression type system, expression checking wired in, context availability, `needs`
 graph, `uses` format, shellcheck/pyflakes, and security/misc (injection, credentials,
 deprecations, cron). Every check is on by default and validated for ZERO false positives
-across a 29-workflow real-world corpus. Remaining items below are refinements and ecosystem
-polish (JSON output, config file, action-metadata resolution, release binaries), not core
-linting gaps.
+across a 29-workflow real-world corpus.
+
+**Post-parity refinements landed** (2026-09-21): plain JSON output (`--format json`);
+`.github/actionlint.yaml` config file; enum tightening (permissions — DSL-derived,
+per-scope levels; shells; runner labels, opt-in); constant-`if` detection; `${{ }}`
+neutralization so shellcheck/pyflakes stop mis-flagging GitHub expressions; a pre-commit
+hook. Remaining items are ecosystem/distribution polish (release binaries, editor
+integrations, WASM playground, action-metadata resolution — needs network) and the
+data-driven webhook/reusable-workflow typing, not core linting gaps.
 
 ## v1 (MVP) — in scope
 - [x] Parse workflow YAML into a form we can validate. (`src/yaml.rs`)
@@ -46,8 +52,16 @@ linting gaps.
 ### Schema thesis helps here (structural/data, resync-able)
 - [ ] Webhook **event / activity-type** validation — resync from octokit/openapi-webhooks
       or github/docs. (Data-driven; fits A+D.)
-- [ ] Enum tightening the SchemaStore schema leaves loose (permissions scopes, shells,
-      runner labels). (Data-driven.)
+- [x] Enum tightening the SchemaStore schema leaves loose (`src/enums.rs`, `src/runner.rs`):
+      - **permissions** scopes + per-scope levels — **derived from the embedded first-party
+        DSL** (`/definitions/permissions-mapping`), so they resync automatically (ADR-0001);
+        strictly more precise than a flat list (e.g. `id-token` ∈ {write, none}). On by
+        default; ZERO false positives across the 29-workflow corpus (a first hardcoded pass
+        wrongly flagged `code-quality`, which drove the DSL-derived design).
+      - **shells** — known keyword set or a custom `<cmd> {0}` template. On by default.
+      - **runner labels** — GitHub-hosted set + config-declared self-hosted labels, matched
+        case-insensitively. **Opt-in** (`--check-runner-labels`): larger-runner/self-hosted
+        labels are unbounded, so a static list can't be zero-FP-by-default without config.
 
 ### Full check parity (ADR-0006) — hand-coded, in progress
 - [x] **Expression `${{ }}` lexer/parser/AST** (`src/expr/`, step 1).
@@ -76,13 +90,19 @@ linting gaps.
       (bash/sh/dash/ksh) or pyflakes (python) via stdin, maps findings to the `run:` node.
       Optional — silently skipped if the tool isn't installed. `--no-external` disables them
       (used by the corpus gate, which tests structural/expression correctness, not tool
-      opinions). Rule ids `run/shellcheck`, `run/pyflakes`.
+      opinions). Rule ids `run/shellcheck`, `run/pyflakes`. **`${{ }}` expressions are
+      neutralized** (replaced by a length/line-preserving inert placeholder — a `$`-var for
+      shell, a bare name for python) before linting, so GitHub expressions don't produce
+      spurious shell/python syntax findings (was SC2296/SC2050 spam on real repos).
 - [x] **Security + misc checks** (`src/checks.rs`, step 8): script-injection from untrusted
       free-text input (`github.event.*` titles/bodies/messages/names, `head_ref`; NOT
       constrained fields like `.sha`/`base.ref`), hardcoded credentials in `credentials`
       blocks, deprecated `::set-output::`/`::save-state::` commands, and cron-syntax
       validation. On by default; ZERO false positives across the 29-workflow xval corpus.
-  - [ ] Follow-up: glob syntax, constant `if:` conditions, deprecated action versions.
+  - [x] Follow-up: **constant `if:` conditions** (`src/checks.rs`, rule `misc/constant-if`) —
+        flags `if: true` / `if: ${{ false }}` (unambiguous constants only; no arbitrary
+        constant-folding, to stay zero-FP). On by default; corpus-clean.
+  - [ ] Follow-up: glob syntax, deprecated action versions.
 - [ ] **Reusable workflow (`workflow_call`)** input/output/secret typing.
 
 ### Diagnostic quality (post-MVP polish)
@@ -99,14 +119,21 @@ linting gaps.
       annotations via `github/codeql-action/upload-sarif`. Each finding carries a grouped
       `ruleId` (structure/required, /type, ...), a full region (start+end from the span),
       and a stable partial fingerprint. Verified against GitHub's SARIF-support docs.
-  - [ ] Follow-up: plain JSON output; a problem-matcher path as a lighter alternative.
+  - [x] Follow-up: **plain JSON output** (`--format json`, `src/json_out.rs`) — a flat array
+        of diagnostic objects for `jq`/scripting. (Problem-matcher path still open.)
 - [x] **`--ignore <REGEX>` filtering** (`src/filter.rs`) — actionlint-compatible: suppress
       diagnostics by message regex, repeatable, fails fast on an invalid pattern.
 - [x] **`--no-external`** flag to disable shellcheck/pyflakes.
 - [ ] Composite action + multi-target release binaries (cross-compilation) — faster,
       cross-OS UX vs the v1 Docker action.
-- [ ] pre-commit hook, Docker image, editor integrations, WASM playground.
-- [ ] plain JSON output; Go-template/custom output; `.github/actionlint.yaml` config file.
+- [x] **pre-commit hook** (`.pre-commit-hooks.yaml`, `language: rust`, scoped to
+      `.github/workflows/*.{yml,yaml}`). Docker image, editor integrations, WASM playground
+      still open.
+- [x] **`.github/actionlint.yaml` config file** (`src/config.rs`) — actionlint-compatible
+      subset: `self-hosted-runner.labels` and repo-committed `ignore` regexes (composed with
+      `--ignore`). Unknown keys ignored (forward-compat); malformed config is exit 2.
+      Discovered by default, or `--config <FILE>` / `--no-config`.
+- [x] **plain JSON output** (see above). Go-template/custom output still open.
 
 ## North star (option B) — DONE (first cut)
 - [x] **DSL→JSON-Schema transpiler** (`src/transpile.rs`): full-fidelity transpile of

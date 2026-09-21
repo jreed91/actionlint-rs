@@ -25,10 +25,14 @@ regression-gated resync pipeline, rather than hand-coded rules. The semantic che
   them (disable with `--no-external`).
 - **Security & misc** — script injection from untrusted input (`${{ github.event.*.title }}`,
   `github.head_ref`, …), hardcoded credentials, deprecated `::set-output::` / `::save-state::`
-  commands, and cron syntax.
+  commands, cron syntax, and constant `if:` conditions (`if: false` never runs).
+- **Enums** — `permissions` scopes and levels (derived from GitHub's own schema, so
+  per-scope: `id-token` accepts only `write`/`none`) and `shell` keywords.
+- **Runner labels** (opt-in, `--check-runner-labels`) — `runs-on` labels checked against the
+  known GitHub-hosted set plus self-hosted labels declared in config.
 
-Every check is on by default and validated against a corpus of real-world workflows for
-false positives.
+Every check (except runner labels) is on by default and validated against a corpus of
+real-world workflows for false positives.
 
 ## Usage
 
@@ -42,12 +46,39 @@ Common flags:
 
 ```sh
 --format sarif            # SARIF 2.1.0 output (for GitHub code scanning)
+--format json             # plain JSON array of diagnostics (for jq / scripting)
 --schema schemastore      # validate against the community SchemaStore schema instead
 --ignore <REGEX>          # suppress diagnostics whose message matches REGEX (repeatable)
 --no-external             # skip shellcheck / pyflakes
+--config <FILE>           # use a specific config file (default: .github/actionlint.yaml)
+--no-config               # ignore any config file
+--check-runner-labels     # also validate runs-on labels (needs config for self-hosted)
 ```
 
 Exit codes: `0` clean, `1` problems found, `2` usage/IO error.
+
+### Configuration
+
+An optional `.github/actionlint.yaml` (actionlint-compatible) is auto-discovered:
+
+```yaml
+self-hosted-runner:
+  labels:            # custom labels accepted by --check-runner-labels
+    - linux-arm64-16core
+ignore:              # message-regex suppressions, committed to the repo
+  - 'unknown runner label'
+```
+
+### As a pre-commit hook
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/jreed91/actionlint-rs
+    rev: v0.1.0
+    hooks:
+      - id: actionlint-rs
+```
 
 ### As a GitHub Action
 
