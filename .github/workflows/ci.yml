@@ -48,13 +48,17 @@ jobs:
         # test theater. See docs/coverage.md.
         run: cargo llvm-cov --lib --fail-under-lines 98 --fail-under-regions 97
 
-  docker-action:
-    # End-to-end test of the v1 distribution: build the image and exercise the action the
-    # way GitHub invokes it (Docker container over the workspace), covering the default
-    # (empty-input -> discovery) path and both exit codes.
+  action:
+    # End-to-end test of the distribution paths:
+    #  1. the Docker image (Dockerfile) exercised the way `runs: using: docker` invokes it, and
+    #  2. the composite action.yml (which, on this branch ref, has no matching release binary
+    #     and so builds from source — the fallback path consumers hit before a release).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The composite action falls back to `cargo build`; ensure a toolchain is present rather
+      # than relying on the runner's preinstalled Rust.
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Build action image
         run: docker build -t actionlint-rs:ci .
@@ -82,8 +86,9 @@ jobs:
           fi
           echo "broken workflow correctly detected (non-zero exit)"
 
-      - name: Action runs via action.yml (composite invocation)
-        # Exercises action.yml itself (inputs, args wiring), not just the raw container.
+      - name: Action runs via action.yml (composite, build-from-source fallback)
+        # Exercises the composite action.yml itself (input wiring + the from-source fallback
+        # taken when no release binary matches this ref).
         uses: ./
         with:
           files: corpus/good/minimal.yml

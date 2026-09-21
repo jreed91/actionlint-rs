@@ -1,0 +1,159 @@
+# Automated release: semantic-release computes the next version from Conventional Commits,
+# bumps Cargo.toml, and publishes a GitHub Release + tag. A second job (triggered when that
+# release is published) cross-compiles the CLI for each target and attaches the binaries.
+#
+# Flow:
+#   push to main ──▶ release job (semantic-release) ──▶ GitHub Release published
+#                                                          │
+#                                        release: published ▼
+#                                                        build job (matrix) ──▶ upload assets
+#
+# Requires Conventional Commit messages (feat:, fix:, feat!/BREAKING CHANGE) to trigger a
+# version bump; other types (docs:, chore:, ci:, ...) ship no release. See docs/RELEASING.md.
+name: release
+
+on:
+  push:
+    branches: [main]
+  # The build job runs when semantic-release publishes a release.
+  release:
+    types: [published]
+
+# Least privilege by default; jobs widen as needed.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── 1. Decide + publish the release (only on push to main) ────────────────────────────────
+  release:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create tags, commits, and the GitHub Release
+      issues: write # semantic-release can comment on released issues/PRs
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # semantic-release needs full history to analyze commits
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install semantic-release + plugins
+        run: |
+          npm install --no-save \
+            semantic-release@24 \
+            @semantic-release/commit-analyzer@13 \
+            @semantic-release/release-notes-generator@14 \
+            @semantic-release/exec@6 \
+            @semantic-release/git@10 \
+            @semantic-release/github@10 \
+            conventional-changelog-conventionalcommits@8
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release
+
+  # ── 2. Build + attach binaries (when a release is published) ──────────────────────────────
+  build:
+    if: github.event_name == 'release'
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # upload release assets
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            cross: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # Linux musl targets build via `cross` (Docker) so aarch64 + musl linking Just Work
+      # without hand-installing cross linkers.
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --locked
+
+      - name: Build (cross)
+        if: matrix.cross
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cross build --release --locked --target "$TARGET"
+
+      - name: Build (native)
+        if: ${{ !matrix.cross }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET"
+
+      # Package: a .tar.gz for unix, .zip for windows, named
+      # actionlint-rs-<version>-<target>.<ext>, plus a .sha256 checksum.
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          version="${TAG#v}"
+          bin="target/${TARGET}/release/actionlint-rs"
+          name="actionlint-rs-${version}-${TARGET}"
+          mkdir -p "dist/$name"
+          cp "$bin" "dist/$name/"
+          cp README.md LICENSE "dist/$name/" 2>/dev/null || true
+          tar -C dist -czf "dist/${name}.tar.gz" "$name"
+          ( cd dist && shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256" )
+          echo "ASSET=dist/${name}.tar.gz" >> "$GITHUB_ENV"
+          echo "ASSET_SHA=dist/${name}.tar.gz.sha256" >> "$GITHUB_ENV"
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          $version = "$env:TAG".TrimStart("v")
+          $bin = "target/$env:TARGET/release/actionlint-rs.exe"
+          $name = "actionlint-rs-$version-$env:TARGET"
+          New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
+          Copy-Item $bin "dist/$name/"
+          Copy-Item README.md,LICENSE "dist/$name/" -ErrorAction SilentlyContinue
+          Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
+          (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower() | Out-File "dist/$name.zip.sha256"
+          "ASSET=dist/$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ASSET_SHA=dist/$name.zip.sha256" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload assets to the release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" "$ASSET" "$ASSET_SHA" --clobber

@@ -104,6 +104,21 @@ fn missing_file_is_usage_error_exit_two() {
 }
 
 #[test]
+fn version_flag_reports_crate_version() {
+    // Release assets are named by this; it must reflect the Cargo.toml version that
+    // semantic-release bumps. `--version` exits 0 and prints `actionlint-rs <version>`.
+    let out = Command::new(bin()).arg("--version").output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("actionlint-rs "), "got: {stdout}");
+    assert!(
+        stdout.trim().contains(env!("CARGO_PKG_VERSION")),
+        "version output {stdout:?} should contain crate version {}",
+        env!("CARGO_PKG_VERSION")
+    );
+}
+
+#[test]
 fn ignore_pattern_suppresses_matching_diagnostics() {
     let dir = tmpdir("ignore");
     let f = dir.join("wf.yml");

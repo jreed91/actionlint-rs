@@ -95,10 +95,18 @@ repos:
 
 ### As a GitHub Action
 
+A composite action that downloads the prebuilt binary for the runner's OS/arch (falling back
+to building from source):
+
 ```yaml
-- uses: your-org/actionlint-rs@v1
-  # optional: files: ".github/workflows/ci.yml"
+- uses: jreed91/actionlint-rs@v1
+  with:
+    files: ".github/workflows/ci.yml"   # optional; omit to lint all workflows
 ```
+
+Prebuilt binaries for Linux (x86_64/aarch64), macOS (arm64), and Windows are attached to each
+[release](https://github.com/jreed91/actionlint-rs/releases). Releases are automated with
+semantic-release — see [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ### Inline PR annotations via SARIF
 

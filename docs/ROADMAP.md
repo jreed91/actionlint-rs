@@ -166,10 +166,19 @@ achievable offline.
 - [x] **`--ignore <REGEX>` filtering** (`src/filter.rs`) — actionlint-compatible: suppress
       diagnostics by message regex, repeatable, fails fast on an invalid pattern.
 - [x] **`--no-external`** flag to disable shellcheck/pyflakes.
-- [ ] Composite action + multi-target release binaries (cross-compilation) — faster,
-      cross-OS UX vs the v1 Docker action. **Deferred: needs cross-compile toolchains and
-      release/publishing infra to build and verify; shipping an unverified release workflow
-      would violate the project's verify-first bar.**
+- [x] **Composite action + multi-target release binaries** — automated via semantic-release
+      (`.releaserc.json`, `.github/workflows/release.yml`, `scripts/set-version.sh`; see
+      `docs/RELEASING.md`). A commit-analyzed version bump publishes a GitHub Release + tag,
+      then a matrix build cross-compiles four targets (linux x86_64/aarch64 musl via `cross`,
+      macOS arm64, windows x86_64) and uploads `.tar.gz`/`.zip` + `.sha256` assets. `action.yml`
+      is now a **composite** action: it downloads the prebuilt binary matching the runner's
+      OS/arch at a version tag, and builds from source as a fallback (branch refs, unbuilt
+      targets). Added `--version` to the CLI. The Dockerfile action is retained.
+      *Verified locally as far as the environment allows:* the cross-arch build recipe
+      (`cargo build --target ...`), `set-version.sh`, `--version`, and all three new
+      workflow/action files (dogfood-linted clean, incl. shellcheck + injection checks; the
+      composite script passes shellcheck). The full four-target build is proven by CI on the
+      first release run.
 - [x] **pre-commit hook** (`.pre-commit-hooks.yaml`, `language: rust`, scoped to
       `.github/workflows/*.{yml,yaml}`). Docker image, editor integrations, WASM playground
       still open.
