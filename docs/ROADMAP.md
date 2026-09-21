@@ -76,7 +76,13 @@ data-driven webhook/reusable-workflow typing, not core linting gaps.
       resyncs) + a pointer→position classifier; the checker flags a context used where it
       isn't available (e.g. `secrets` in `runs-on`). On by default; ZERO false positives
       across the 29-workflow xval corpus.
-  - [ ] Follow-up: step-output existence (`steps.<id>.outputs.<name>`), needs-output typing.
+  - [x] Follow-up: **step / needs reference existence** (`src/dataflow.rs`) — a `steps.<id>...`
+        must name a step with that `id:` in the same job (`dataflow/step-output`); a
+        `needs.<job>...` must name a job in this job's `needs:` (`dataflow/needs-output`). We
+        check id/job *existence* (statically knowable), not output-*name* existence (a `run:`
+        step's outputs are dynamic; a `uses:` step's need `action.yml`, offline). On by
+        default; corpus-clean except one **true positive** (docker-bpa-ci.yml's `registry-cache`
+        job references `steps.buildx` which it doesn't define — a real latent bug).
 - [x] **`needs:` graph** (`src/graph.rs`, step 5) — undefined-job references + cycle
       detection (iterative DFS, one finding per cycle). On by default; ZERO false positives
       across the 29-workflow xval corpus.

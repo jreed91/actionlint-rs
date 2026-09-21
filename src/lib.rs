@@ -5,6 +5,7 @@
 
 pub mod checks;
 pub mod config;
+pub mod dataflow;
 pub mod diagnostic;
 pub mod enums;
 pub mod expr;
