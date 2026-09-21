@@ -17,9 +17,17 @@ across a 29-workflow real-world corpus.
 `.github/actionlint.yaml` config file; enum tightening (permissions — DSL-derived,
 per-scope levels; shells; runner labels, opt-in); constant-`if` detection; `${{ }}`
 neutralization so shellcheck/pyflakes stop mis-flagging GitHub expressions; a pre-commit
-hook. Remaining items are ecosystem/distribution polish (release binaries, editor
-integrations, WASM playground, action-metadata resolution — needs network) and the
-data-driven webhook/reusable-workflow typing, not core linting gaps.
+hook; **dataflow** (undefined `steps.<id>` / non-needed `needs.<job>`); **reusable-workflow
+(`workflow_call`) input/secret typing** for local callees; **webhook event + activity-type**
+validation; **glob-pattern syntax**; and a diagnostic-quality fix (reusable-job shape →
+"missing `uses`"). Every one is corpus-clean (zero false positives) and verified on a real
+repo (digital-order-processing).
+
+**Only environment-blocked items remain:** multi-target release binaries / composite action
+(need cross-compile toolchains + publishing infra), remote `action.yml` `with:`-input
+resolution (needs network), and deprecated-action-version data (needs a resync-able network
+dataset to stay zero-FP). Each is marked below with its blocker; none is a core linting gap
+achievable offline.
 
 ## v1 (MVP) — in scope
 - [x] Parse workflow YAML into a form we can validate. (`src/yaml.rs`)
@@ -97,6 +105,9 @@ data-driven webhook/reusable-workflow typing, not core linting gaps.
       (containing `$`) are skipped. On by default; ZERO false positives across the 29 real
       workflows (surfaced + handled home-assistant's `$/...` substitution form).
   - [ ] Follow-up (needs network): resolve `action.yml` to type-check `with:` inputs.
+        **Deferred: resolving a remote action's `action.yml` requires network access, which is
+        out of scope for an offline linter pass.** (The *local* reusable-workflow analog IS
+        done — see `workflow_call` typing below.)
 - [x] **shellcheck / pyflakes** integration for `run:` blocks (`src/run_lint.rs`, step 7):
       detects the effective shell (step/job/workflow default, else bash), spawns shellcheck
       (bash/sh/dash/ksh) or pyflakes (python) via stdin, maps findings to the `run:` node.
@@ -156,7 +167,9 @@ data-driven webhook/reusable-workflow typing, not core linting gaps.
       diagnostics by message regex, repeatable, fails fast on an invalid pattern.
 - [x] **`--no-external`** flag to disable shellcheck/pyflakes.
 - [ ] Composite action + multi-target release binaries (cross-compilation) — faster,
-      cross-OS UX vs the v1 Docker action.
+      cross-OS UX vs the v1 Docker action. **Deferred: needs cross-compile toolchains and
+      release/publishing infra to build and verify; shipping an unverified release workflow
+      would violate the project's verify-first bar.**
 - [x] **pre-commit hook** (`.pre-commit-hooks.yaml`, `language: rust`, scoped to
       `.github/workflows/*.{yml,yaml}`). Docker image, editor integrations, WASM playground
       still open.
