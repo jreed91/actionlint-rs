@@ -1,0 +1,38 @@
+# Baseline guard: the golden corpus, its snapshots, and the xval baseline are the expected
+# answers CI checks against (corpus/README.md, ADR-0003). A PR that changes them can make a
+# failing check pass by moving the goalposts, so it needs a human to opt in with the
+# `baseline-change` label. This matters most for agent-written PRs.
+name: baseline-guard
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the baseline-change label for expected-answer edits
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'baseline-change') }}
+        run: |
+          touched="$(gh pr diff "$PR" --repo "$REPO" --name-only \
+            | grep -E '^(corpus/|tests/snapshots/|\.github/workflows/baseline-guard\.yml$)' || true)"
+          if [ -z "$touched" ]; then
+            echo "No baseline files changed."
+            exit 0
+          fi
+          echo "Baseline files changed:"
+          echo "$touched"
+          if [ "$HAS_LABEL" = "true" ]; then
+            echo "baseline-change label present; allowed."
+            exit 0
+          fi
+          echo "::error::This PR changes expected answers (corpus, snapshots, or this guard). A maintainer must review the baseline diff and add the 'baseline-change' label."
+          exit 1
